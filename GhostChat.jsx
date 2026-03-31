@@ -654,13 +654,14 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
   const [results, setResults] = useState([]);
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState("");
+  const normalizedCode = normalizePeerCode(code);
+  const canSearch = normalizedCode.length === 6;
 
   const search = () => {
     setScanning(true);
     setResults([]);
     setStatus("");
     window.setTimeout(() => {
-      const normalizedCode = normalizePeerCode(code);
       if (!normalizedCode) {
         setStatus("Peer code is required");
         setScanning(false);
@@ -713,7 +714,7 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
       <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
         JOIN VIA <span style={{ color: COLORS.accent }}>PEER CODE</span>
       </div>
-      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Username lookup is disabled for privacy</div>
+      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Enter full peer code to connect (username lookup is disabled)</div>
 
       {status && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>{status}</div>}
 
@@ -742,13 +743,14 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
       <button
         type="button"
         onClick={search}
+        disabled={!canSearch || scanning}
         style={{
           width: "100%",
           marginTop: 12,
           border: "none",
           cursor: "pointer",
-          background: `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
-          color: COLORS.bg,
+          background: canSearch && !scanning ? `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)` : COLORS.card,
+          color: canSearch && !scanning ? COLORS.bg : COLORS.textMuted,
           fontFamily: FONT,
           fontSize: 13,
           borderRadius: 12,
