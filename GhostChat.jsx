@@ -201,263 +201,6 @@ function Avatar({ name, size = 42, online }) {
   );
 }
 
-function MatrixBackground() {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
-
-    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノ<>{}[]()=+-*/&|^~ABCDEFabcdef";
-    const fontSize = 13;
-    const columnsWidth = 13;
-    let drops = [];
-    let frameId = 0;
-
-    const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      const columns = Math.floor(canvas.width / columnsWidth);
-      drops = Array.from({ length: columns }, () => Math.floor(Math.random() * canvas.height));
-    };
-
-    const draw = () => {
-      ctx.fillStyle = "rgba(5, 8, 16, 0.18)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = '13px "Fira Code", "Courier New", monospace';
-
-      for (let i = 0; i < drops.length; i += 1) {
-        const text = chars[Math.floor(Math.random() * chars.length)];
-        const opacity = (Math.random() * (0.5 - 0.15) + 0.15).toFixed(2);
-        ctx.fillStyle = Math.random() < 0.03 ? "#ffffff" : `rgba(0,255,178,${opacity})`;
-        const x = i * columnsWidth;
-        const y = drops[i];
-        ctx.fillText(text, x, y);
-        drops[i] = y + fontSize;
-
-        if (drops[i] > canvas.height && Math.random() > 0.975) {
-          drops[i] = 0;
-        }
-      }
-
-      frameId = window.requestAnimationFrame(draw);
-    };
-
-    resize();
-    draw();
-    window.addEventListener("resize", resize);
-
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", resize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }} />;
-}
-
-function IDETabBar() {
-  const tabs = [
-    { name: "ghost_chat.tsx", active: true },
-    { name: "tunnel.ws.ts", active: false },
-    { name: "crypto.util.ts", active: false },
-    { name: "// README", active: false },
-  ];
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 34,
-        zIndex: 1,
-        pointerEvents: "none",
-        display: "flex",
-        alignItems: "center",
-      }}
-    >
-      <div style={{ display: "flex", gap: 6, padding: "0 14px" }}>
-        {["#FF5F57", "#FFBD2E", "#28C840"].map((dot) => (
-          <span key={dot} style={{ width: 11, height: 11, borderRadius: "50%", background: dot, opacity: 0.7 }} />
-        ))}
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-        {tabs.map((tab) => (
-          <div
-            key={tab.name}
-            style={{
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 11,
-              color: tab.active ? "#4EC9B0" : "#3a4a3a",
-              borderBottom: tab.active ? "2px solid #00FFB2" : "2px solid transparent",
-              paddingBottom: 5,
-            }}
-          >
-            {tab.name}
-          </div>
-        ))}
-      </div>
-
-      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, paddingRight: 14 }}>
-        {["Ln 247, Col 18", "UTF-8", "TypeScript", "⚡ E2E"].map((item) => (
-          <div
-            key={item}
-            style={{
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 10,
-              color: item === "⚡ E2E" ? COLORS.accent : "#2a4a2a",
-            }}
-          >
-            {item}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function IDEGutter() {
-  const colorCycle = ["#6A9955", "#569CD6", "#4EC9B0"];
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: 260,
-        zIndex: 1,
-        pointerEvents: "none",
-        overflow: "hidden",
-        padding: "20px 0",
-      }}
-    >
-      {Array.from({ length: 60 }).map((_, i) => (
-        <div key={`left-${i}`} style={{ height: 19, display: "flex", alignItems: "center", paddingLeft: 12 }}>
-          <span
-            style={{
-              minWidth: 22,
-              textAlign: "right",
-              marginRight: 8,
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 10,
-              color: "#2a3a2a",
-            }}
-          >
-            {i + 1}
-          </span>
-          <span
-            style={{
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 10,
-              color: colorCycle[i % 3],
-              opacity: 0.45,
-              whiteSpace: "nowrap",
-            }}
-          >
-            {LEFT_SNIPPETS[i % LEFT_SNIPPETS.length]}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IDEGutterRight() {
-  const colorCycle = ["#CE9178", "#C586C0", "#DCDCAA", "#4EC9B0"];
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        right: 0,
-        top: 0,
-        bottom: 0,
-        width: 260,
-        zIndex: 1,
-        pointerEvents: "none",
-        overflow: "hidden",
-        padding: "20px 0",
-      }}
-    >
-      {Array.from({ length: 60 }).map((_, i) => (
-        <div key={`right-${i}`} style={{ height: 19, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 12 }}>
-          <span
-            style={{
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 10,
-              color: colorCycle[i % 4],
-              opacity: 0.45,
-              whiteSpace: "nowrap",
-              textAlign: "right",
-              marginRight: 8,
-            }}
-          >
-            {RIGHT_SNIPPETS[i % RIGHT_SNIPPETS.length]}
-          </span>
-          <span
-            style={{
-              minWidth: 22,
-              textAlign: "right",
-              fontFamily: '"Fira Code", monospace',
-              fontSize: 10,
-              color: "#2a3a2a",
-            }}
-          >
-            {i + 1}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IDEStatusBar() {
-  const [clock, setClock] = useState(() => {
-    const now = new Date();
-    return now.toLocaleTimeString("en-GB", { hour12: false });
-  });
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const now = new Date();
-      setClock(now.toLocaleTimeString("en-GB", { hour12: false }));
-    }, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 22,
-        zIndex: 1,
-        pointerEvents: "none",
-        display: "flex",
-        alignItems: "center",
-        fontFamily: '"Fira Code", monospace',
-        fontSize: 10,
-      }}
-    >
-      <div style={{ color: COLORS.accent, fontWeight: 700, padding: "0 12px" }}>◈ GHOST_NET</div>
-      <div style={{ color: "#4EC9B0", marginRight: 12 }}>⎇ main</div>
-      <div style={{ color: COLORS.accent, marginRight: 12 }}>✓ E2E active</div>
-      <div style={{ color: "#569CD6", marginRight: 12 }}>⚡ wss://ghost.net</div>
-      <div style={{ color: "#DCDCAA" }}>🔒 AES-256-GCM</div>
-      <div style={{ marginLeft: "auto", color: "#2a4a2a", paddingRight: 12 }}>{clock}</div>
-    </div>
-  );
-}
-
 function StatusBar() {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 20px 4px", fontSize: 11, color: COLORS.textMuted, fontFamily: FONT }}>
@@ -511,7 +254,7 @@ function NavBar({ tab, onTab }) {
   );
 }
 
-function ChatsScreen({ onOpen, onRegisterRoom }) {
+function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   const [showNew, setShowNew] = useState(false);
   const [peerCode, setPeerCode] = useState("");
   const [handle, setHandle] = useState("");
@@ -572,7 +315,7 @@ function ChatsScreen({ onOpen, onRegisterRoom }) {
       </div>
 
       <div style={{ padding: "0 12px" }}>
-        {CHATS.map((c) => (
+        {chats.map((c) => (
           <div
             key={c.id}
             role="button"
@@ -625,7 +368,7 @@ function ChatsScreen({ onOpen, onRegisterRoom }) {
       <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, padding: "12px 12px 4px" }}>GROUPS</div>
 
       <div style={{ padding: "0 12px" }}>
-        {GROUPS.map((g) => (
+        {groups.map((g) => (
           <div
             key={g.id}
             style={{
