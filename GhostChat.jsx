@@ -21,67 +21,20 @@ const COLORS = {
 const FONT = "'Space Mono', monospace";
 const SANS = "'DM Sans', sans-serif";
 
-const CHATS = [
-  { id: 1, name: "🦊 Phantom", last: "you there?", time: "2m", unread: 3, online: true },
-  { id: 2, name: "🐺 Cipher", last: "sent a file", time: "15m", unread: 0, online: true },
-  { id: 3, name: "🌙 Nyx", last: "ok done", time: "1h", unread: 1, online: false },
-  { id: 4, name: "🔥 Blaze", last: "haha yeah", time: "3h", unread: 0, online: false },
-];
+const CHATS = [];
 
-const GROUPS = [
-  { id: 10, name: "🛸 Ghost Squad", members: 5, last: "🦊: let's go", time: "5m", unread: 7 },
-  { id: 11, name: "🌊 Deep Sea", members: 3, last: "🐺: check this", time: "20m", unread: 0 },
-];
+const GROUPS = [];
 
-const MESSAGES = [
-  { id: 1, from: "them", text: "hey, you got the new code?", time: "14:32", read: true },
-  { id: 2, from: "me", text: "just generated one, sharing now", time: "14:33", read: true },
-  { id: 3, from: "them", text: "🔐 used it, we're in the same tunnel now", time: "14:33", read: true },
-  { id: 4, from: "me", text: "nice. E2E is active, we good", time: "14:34", read: true },
-  { id: 5, from: "them", text: "you there?", time: "14:51", read: false },
-];
+const MESSAGES = [];
 
-const SEARCH_RESULTS = [
-  { id: 5, name: "🎭 Wraith", code: "WR-7741", mutual: 2 },
-  { id: 6, name: "🐉 Dex", code: "DX-3392", mutual: 0 },
-  { id: 7, name: "🦋 Mirage", code: "MR-9901", mutual: 1 },
-];
+const SEARCH_RESULTS = [];
 
-const LEFT_SNIPPETS = [
-  "// ghost_chat — privacy tunnel app",
-  "const tunnel = new WebSocket(wss);",
-  "// E2E encryption layer active",
-  "const key = generateEphemeralKey();",
-  "await encrypt(msg, AES256);",
-  "socket.on('message', decrypt);",
-  "// peer_code: valid for 10min",
-  "session.destroy_on_read = true;",
-  "const hash = sha256(roomId);",
-  "// zero knowledge proof ✓",
-  "emit('ghost_mode', { active: true });",
-  "db.messages.autoShred(30s);",
-  "// wss://ghost.net:443/tunnel",
-  "auth.jwt.sign(payload, SECRET);",
-  "return cipher.finalize();",
-];
-
-const RIGHT_SNIPPETS = [
-  "router.get('/room/:id', auth);",
-  "// AES-256-GCM mode",
-  "ws.send(JSON.stringify(payload));",
-  "const iv = crypto.randomBytes(16);",
-  "// message auto-shred: ON",
-  "user.emoji = '🦅';",
-  "group.maxMembers = 50;",
-  "// screenshot guard active",
-  "tunnel.onclose = cleanup;",
-  "return { status: 'secured' };",
-  "// ghost net v2.0.1",
-  "peer.code = generateCode();",
-  "// expiry: singleUse",
-  "logger.disabled = true;",
-  "// no logs. no trace.",
-];
+const DEFAULT_SETTINGS = {
+  endToEndEncryption: true,
+  websocketTunnels: true,
+  messageShredding: true,
+  stealthMode: false,
+};
 
 function addAlpha(hex, alphaHex) {
   return `${hex}${alphaHex}`;
@@ -149,17 +102,6 @@ function LockIcon({ size = 11 }) {
   );
 }
 
-function WifiIcon({ active }) {
-  const color = active ? COLORS.accent : COLORS.textMuted;
-  return (
-    <svg width="15" height="11" viewBox="0 0 18 12" fill="none" aria-hidden>
-      <path d="M1 4.5C5.8 1 12.2 1 17 4.5" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M4 7c3.2-2.2 6.8-2.2 10 0" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
-      <circle cx="9" cy="10" r="1.2" fill={color} />
-    </svg>
-  );
-}
-
 function OnlineDot({ online }) {
   return (
     <span
@@ -197,19 +139,6 @@ function Avatar({ name, size = 42, online }) {
         {getEmoji(name)}
       </div>
       {typeof online === "boolean" && <OnlineDot online={online} />}
-    </div>
-  );
-}
-
-function StatusBar() {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 20px 4px", fontSize: 11, color: COLORS.textMuted, fontFamily: FONT }}>
-      <span>9:41</span>
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <WifiIcon active />
-        <span style={{ color: COLORS.accent, fontSize: 10 }}>E2E</span>
-        <span>●●●</span>
-      </div>
     </div>
   );
 }
@@ -315,6 +244,11 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
       </div>
 
       <div style={{ padding: "0 12px" }}>
+        {chats.length === 0 && (
+          <div style={{ padding: "10px 12px", borderRadius: 12, background: COLORS.card, border: `1px solid ${COLORS.border}`, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>
+            No chats yet. Tap <span style={{ color: COLORS.accent, fontFamily: FONT }}>+ NEW</span> to open your first tunnel.
+          </div>
+        )}
         {chats.map((c) => (
           <div
             key={c.id}
@@ -365,7 +299,7 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
         ))}
       </div>
 
-      <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, padding: "12px 12px 4px" }}>GROUPS</div>
+      {groups.length > 0 && <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, padding: "12px 12px 4px" }}>GROUPS</div>}
 
       <div style={{ padding: "0 12px" }}>
         {groups.map((g) => (
@@ -539,7 +473,7 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   );
 }
 
-function ChatRoom({ chat, onBack }) {
+function ChatRoom({ chat, onBack, settings }) {
   const [msg, setMsg] = useState("");
   const [messages, setMessages] = useState(chat?.seedMessages || MESSAGES);
   const [typing, setTyping] = useState(false);
@@ -551,6 +485,10 @@ function ChatRoom({ chat, onBack }) {
     setMsg("");
     setTyping(false);
   }, [chat?.id]);
+
+  const shreddingEnabled = settings?.messageShredding ?? true;
+  const tunnelEnabled = settings?.websocketTunnels ?? true;
+  const encryptionEnabled = settings?.endToEndEncryption ?? true;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -564,17 +502,19 @@ function ChatRoom({ chat, onBack }) {
   );
 
   useEffect(() => {
+    if (!shreddingEnabled) return undefined;
     const shredTimer = window.setInterval(() => {
       const now = Date.now();
       setMessages((prev) => prev.filter((item) => !item.expiresAt || item.expiresAt > now));
     }, 5000);
     return () => window.clearInterval(shredTimer);
-  }, []);
+  }, [shreddingEnabled]);
 
   const send = () => {
+    if (!tunnelEnabled) return;
     const text = msg.trim();
     if (!text) return;
-    const mine = { id: Date.now(), from: "me", text, time: getNowHHMM(), read: false, expiresAt: Date.now() + 45000 };
+    const mine = { id: Date.now(), from: "me", text, time: getNowHHMM(), read: false, expiresAt: shreddingEnabled ? Date.now() + 45000 : undefined };
     setMessages((prev) => [...prev, mine]);
     setMsg("");
 
@@ -583,7 +523,7 @@ function ChatRoom({ chat, onBack }) {
       setTyping(false);
       setMessages((prev) => {
         const marked = prev.map((item) => (item.from === "me" && !item.read ? { ...item, read: true } : item));
-        return [...marked, { id: Date.now() + 1, from: "them", text: "got it 👍", time: getNowHHMM(), read: false, expiresAt: Date.now() + 45000 }];
+        return [...marked, { id: Date.now() + 1, from: "them", text: "got it 👍", time: getNowHHMM(), read: false, expiresAt: shreddingEnabled ? Date.now() + 45000 : undefined }];
       });
     }, 2000);
 
@@ -615,13 +555,13 @@ function ChatRoom({ chat, onBack }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentDim, borderRadius: 12, padding: "4px 8px" }}>
           <LockIcon size={11} />
-          <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.accent }}>E2E</span>
+          <span style={{ fontFamily: FONT, fontSize: 9, color: encryptionEnabled ? COLORS.accent : COLORS.textMuted }}>{encryptionEnabled ? "E2E" : "PLAIN"}</span>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: 0, display: "flex", flexDirection: "column", gap: 0 }}>
         <div style={{ alignSelf: "center", marginTop: 10, marginBottom: 8, fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, background: COLORS.card, borderRadius: 8, padding: "3px 10px" }}>
-          🔒 Secure tunnel established
+          {tunnelEnabled ? `${encryptionEnabled ? "🔒" : "⚠️"} ${encryptionEnabled ? "Secure" : "Unencrypted"} tunnel established` : "🌐 Tunnel disabled in settings"}
         </div>
 
         {messages.map((m) => (
@@ -689,7 +629,8 @@ function ChatRoom({ chat, onBack }) {
           onKeyDown={(e) => {
             if (e.key === "Enter") send();
           }}
-          placeholder="Type securely..."
+          placeholder={tunnelEnabled ? "Type securely..." : "Enable WebSocket tunnels in Profile settings"}
+          disabled={!tunnelEnabled}
           style={{
             flex: 1,
             background: COLORS.card,
@@ -705,6 +646,7 @@ function ChatRoom({ chat, onBack }) {
         <button
           type="button"
           onClick={send}
+          disabled={!tunnelEnabled}
           style={{
             width: 36,
             height: 36,
@@ -891,6 +833,12 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {!scanning && results.length === 0 && (query.trim() || code.trim()) && !status && (
+        <div style={{ marginTop: 14, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>
+          No matching rooms found.
         </div>
       )}
     </div>
@@ -1230,7 +1178,7 @@ function GroupsScreen({ groups, onCreateGroupRoom }) {
   );
 }
 
-function ProfileScreen() {
+function ProfileScreen({ settings, onUpdateSettings }) {
   const [username, setUsername] = useState("🦅 Falcon");
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState("");
@@ -1426,11 +1374,11 @@ function ProfileScreen() {
       <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14 }}>
         <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 4 }}>SECURITY</div>
         {[
-          ["🔒", "End-to-end Encryption", "AES-256", true],
-          ["🌐", "WebSocket Tunnels", "WSS/TLS", true],
-          ["🧅", "Message Shredding", "On", true],
-          ["🕵️", "Stealth Mode", "Off", false],
-        ].map(([icon, label, value, active], i, arr) => (
+          ["endToEndEncryption", "🔒", "End-to-end Encryption", settings.endToEndEncryption ? "AES-256" : "Disabled", settings.endToEndEncryption],
+          ["websocketTunnels", "🌐", "WebSocket Tunnels", settings.websocketTunnels ? "WSS/TLS" : "Disabled", settings.websocketTunnels],
+          ["messageShredding", "🧅", "Message Shredding", settings.messageShredding ? "On" : "Off", settings.messageShredding],
+          ["stealthMode", "🕵️", "Stealth Mode", settings.stealthMode ? "On" : "Off", settings.stealthMode],
+        ].map(([key, icon, label, value, active], i, arr) => (
           <div
             key={label}
             style={{
@@ -1443,7 +1391,22 @@ function ProfileScreen() {
           >
             <span style={{ fontSize: 18 }}>{icon}</span>
             <span style={{ fontFamily: SANS, fontSize: 13, color: COLORS.text, flex: 1 }}>{label}</span>
-            <span style={{ fontFamily: FONT, fontSize: 10, color: active ? COLORS.accent : COLORS.textMuted }}>{value}</span>
+            <button
+              type="button"
+              onClick={() => onUpdateSettings(key)}
+              style={{
+                border: `1px solid ${active ? addAlpha(COLORS.accent, "50") : COLORS.border}`,
+                borderRadius: 999,
+                background: active ? COLORS.accentDim : COLORS.surface,
+                color: active ? COLORS.accent : COLORS.textMuted,
+                fontFamily: FONT,
+                fontSize: 10,
+                padding: "4px 8px",
+                cursor: "pointer",
+              }}
+            >
+              {value}
+            </button>
           </div>
         ))}
       </div>
@@ -1456,6 +1419,14 @@ export default function GhostChat() {
   const [activeChat, setActiveChat] = useState(null);
   const [chats, setChats] = useState(CHATS);
   const [groups, setGroups] = useState(GROUPS);
+  const [settings, setSettings] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("gc.settings");
+      return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : DEFAULT_SETTINGS;
+    } catch {
+      return DEFAULT_SETTINGS;
+    }
+  });
   const [roomDirectory, setRoomDirectory] = useState(() => {
     const seeded = {};
     SEARCH_RESULTS.forEach((item) => {
@@ -1484,6 +1455,10 @@ export default function GhostChat() {
       document.head.appendChild(link);
     }
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("gc.settings", JSON.stringify(settings));
+  }, [settings]);
 
   const registerRoom = (chatLike, rawCode) => {
     const code = displayPeerCode(rawCode || chatLike?.code || generatePeerCode());
@@ -1527,7 +1502,7 @@ export default function GhostChat() {
 
   let content;
   if (activeChat) {
-    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} />;
+    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} settings={settings} />;
   } else if (tab === "chats") {
     content = <ChatsScreen chats={chats} groups={groups} onOpen={openRoom} onRegisterRoom={registerRoom} />;
   } else if (tab === "search") {
@@ -1552,7 +1527,7 @@ export default function GhostChat() {
   } else if (tab === "groups") {
     content = <GroupsScreen groups={groups} onCreateGroupRoom={registerRoom} />;
   } else {
-    content = <ProfileScreen />;
+    content = <ProfileScreen settings={settings} onUpdateSettings={(key) => setSettings((prev) => ({ ...prev, [key]: !prev[key] }))} />;
   }
 
   return (
@@ -1593,8 +1568,6 @@ input::placeholder { color: #4B5563; }
           zIndex: 10,
         }}
       >
-        <StatusBar />
-
         <div style={{ flex: 1, overflowY: "auto" }}>{content}</div>
 
         {!activeChat && <NavBar tab={tab} onTab={setTab} />}
