@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostchat.local/schemas/server-events.schema.json",
+  "title": "GhostChat Server -> Client Events",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionReadyEnvelope" },
+    { "$ref": "#/$defs/roomCodeGeneratedEnvelope" },
+    { "$ref": "#/$defs/roomJoinedEnvelope" },
+    { "$ref": "#/$defs/roomLeftEnvelope" },
+    { "$ref": "#/$defs/roomMemberJoinedEnvelope" },
+    { "$ref": "#/$defs/roomMemberLeftEnvelope" },
+    { "$ref": "#/$defs/msgNewEnvelope" },
+    { "$ref": "#/$defs/msgAckEnvelope" },
+    { "$ref": "#/$defs/typingUpdateEnvelope" },
+    { "$ref": "#/$defs/presenceUpdateEnvelope" },
+    { "$ref": "#/$defs/groupCreatedEnvelope" },
+    { "$ref": "#/$defs/errorEnvelope" },
+    { "$ref": "#/$defs/securityNoticeEnvelope" }
+  ],
+  "$defs": {
+    "baseEnvelope": {
+      "type": "object",
+      "required": ["v", "event", "ts", "data"],
+      "properties": {
+        "v": { "const": "1.0" },
+        "event": { "type": "string" },
+        "reqId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ts": { "type": "integer", "minimum": 0 },
+        "data": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "sessionReadyEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "session.ready" },
+            "data": {
+              "type": "object",
+              "required": ["sessionId", "serverTime", "features"],
+              "properties": {
+                "sessionId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "serverTime": { "type": "integer", "minimum": 0 },
+                "features": {
+                  "type": "object",
+                  "required": ["e2ee", "autoShred", "groups"],
+                  "properties": {
+                    "e2ee": { "type": "boolean" },
+                    "autoShred": { "type": "boolean" },
+                    "groups": { "type": "boolean" }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomCodeGeneratedEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.code_generated" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "roomCode", "expiresAt", "kind"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "roomCode": { "type": "string", "pattern": "^[A-Z]{2}-[2-9]{4}$" },
+                "expiresAt": { "type": "integer", "minimum": 0 },
+                "kind": { "enum": ["direct", "group"] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomJoinedEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.joined" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "roomCode", "kind", "joinedAt", "members", "security"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "roomCode": { "type": "string", "pattern": "^[A-Z]{2}-[2-9]{4}$" },
+                "kind": { "enum": ["direct", "group"] },
+                "joinedAt": { "type": "integer", "minimum": 0 },
+                "members": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["peerId", "username", "emoji", "online"],
+                    "properties": {
+                      "peerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                      "username": { "type": "string", "minLength": 1, "maxLength": 40 },
+                      "emoji": { "type": "string", "minLength": 1, "maxLength": 4 },
+                      "online": { "type": "boolean" }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "security": {
+                  "type": "object",
+                  "required": ["e2eeRequired", "algorithm"],
+                  "properties": {
+                    "e2eeRequired": { "type": "boolean" },
+                    "algorithm": { "enum": ["AES-256-GCM", "XCHACHA20-POLY1305"] }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomLeftEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.left" },
+            "data": {
+              "type": "object",
+              "required": ["roomId"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomMemberJoinedEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.member_joined" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "peerId", "username", "emoji"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "peerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "username": { "type": "string", "minLength": 1, "maxLength": 40 },
+                "emoji": { "type": "string", "minLength": 1, "maxLength": 4 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomMemberLeftEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.member_left" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "peerId", "leftAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "peerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "leftAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "msgNewEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "msg.new" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "msgId", "fromPeerId", "fromEmoji", "bodyCiphertext", "sentAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "msgId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "fromPeerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "fromEmoji": { "type": "string", "minLength": 1, "maxLength": 4 },
+                "bodyCiphertext": { "type": "string", "minLength": 1 },
+                "nonce": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "sentAt": { "type": "integer", "minimum": 0 },
+                "autoShredAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "msgAckEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "msg.ack" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "clientMsgId", "msgId", "deliveredAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "clientMsgId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "msgId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "deliveredAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "typingUpdateEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "typing.update" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "peerId", "isTyping", "ts"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "peerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "isTyping": { "type": "boolean" },
+                "ts": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "presenceUpdateEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "presence.update" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "peerId", "online"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "peerId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "online": { "type": "boolean" },
+                "lastSeenAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "groupCreatedEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "group.created" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "roomCode", "name", "emoji", "expiresAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "roomCode": { "type": "string", "pattern": "^[A-Z]{2}-[2-9]{4}$" },
+                "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+                "emoji": { "type": "string", "minLength": 1, "maxLength": 4 },
+                "expiresAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "errorEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "error" },
+            "data": {
+              "type": "object",
+              "required": ["code", "message"],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "INVALID_CODE",
+                    "ROOM_EXPIRED",
+                    "ROOM_FULL",
+                    "UNAUTHORIZED",
+                    "RATE_LIMITED",
+                    "BAD_PAYLOAD",
+                    "INTERNAL"
+                  ]
+                },
+                "message": { "type": "string", "minLength": 1, "maxLength": 200 },
+                "event": { "type": "string", "maxLength": 80 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "securityNoticeEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "security.notice" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "type", "message"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "type": { "enum": ["E2EE_REQUIRED", "KEY_ROTATED", "AUTO_SHRED"] },
+                "message": { "type": "string", "minLength": 1, "maxLength": 200 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

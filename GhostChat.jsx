@@ -1,0 +1,1860 @@
+import React, { useEffect, useRef, useState } from "react";
+
+const COLORS = {
+  bg: "#080B12",
+  surface: "#0D1117",
+  card: "#111827",
+  border: "#1F2937",
+  accent: "#00FFB2",
+  accentDim: "#00FFB220",
+  accentGlow: "#00FFB240",
+  purple: "#A855F7",
+  purpleDim: "#A855F720",
+  red: "#FF4444",
+  text: "#F1F5F9",
+  textMuted: "#6B7280",
+  textSub: "#9CA3AF",
+  bubble: "#1A2235",
+  bubbleSelf: "#003D2A",
+};
+
+const FONT = "'Space Mono', monospace";
+const SANS = "'DM Sans', sans-serif";
+
+const CHATS = [
+  { id: 1, name: "🦊 Phantom", last: "you there?", time: "2m", unread: 3, online: true },
+  { id: 2, name: "🐺 Cipher", last: "sent a file", time: "15m", unread: 0, online: true },
+  { id: 3, name: "🌙 Nyx", last: "ok done", time: "1h", unread: 1, online: false },
+  { id: 4, name: "🔥 Blaze", last: "haha yeah", time: "3h", unread: 0, online: false },
+];
+
+const GROUPS = [
+  { id: 10, name: "🛸 Ghost Squad", members: 5, last: "🦊: let's go", time: "5m", unread: 7 },
+  { id: 11, name: "🌊 Deep Sea", members: 3, last: "🐺: check this", time: "20m", unread: 0 },
+];
+
+const MESSAGES = [
+  { id: 1, from: "them", text: "hey, you got the new code?", time: "14:32", read: true },
+  { id: 2, from: "me", text: "just generated one, sharing now", time: "14:33", read: true },
+  { id: 3, from: "them", text: "🔐 used it, we're in the same tunnel now", time: "14:33", read: true },
+  { id: 4, from: "me", text: "nice. E2E is active, we good", time: "14:34", read: true },
+  { id: 5, from: "them", text: "you there?", time: "14:51", read: false },
+];
+
+const SEARCH_RESULTS = [
+  { id: 5, name: "🎭 Wraith", code: "WR-7741", mutual: 2 },
+  { id: 6, name: "🐉 Dex", code: "DX-3392", mutual: 0 },
+  { id: 7, name: "🦋 Mirage", code: "MR-9901", mutual: 1 },
+];
+
+const LEFT_SNIPPETS = [
+  "// ghost_chat — privacy tunnel app",
+  "const tunnel = new WebSocket(wss);",
+  "// E2E encryption layer active",
+  "const key = generateEphemeralKey();",
+  "await encrypt(msg, AES256);",
+  "socket.on('message', decrypt);",
+  "// peer_code: valid for 10min",
+  "session.destroy_on_read = true;",
+  "const hash = sha256(roomId);",
+  "// zero knowledge proof ✓",
+  "emit('ghost_mode', { active: true });",
+  "db.messages.autoShred(30s);",
+  "// wss://ghost.net:443/tunnel",
+  "auth.jwt.sign(payload, SECRET);",
+  "return cipher.finalize();",
+];
+
+const RIGHT_SNIPPETS = [
+  "router.get('/room/:id', auth);",
+  "// AES-256-GCM mode",
+  "ws.send(JSON.stringify(payload));",
+  "const iv = crypto.randomBytes(16);",
+  "// message auto-shred: ON",
+  "user.emoji = '🦅';",
+  "group.maxMembers = 50;",
+  "// screenshot guard active",
+  "tunnel.onclose = cleanup;",
+  "return { status: 'secured' };",
+  "// ghost net v2.0.1",
+  "peer.code = generateCode();",
+  "// expiry: singleUse",
+  "logger.disabled = true;",
+  "// no logs. no trace.",
+];
+
+function addAlpha(hex, alphaHex) {
+  return `${hex}${alphaHex}`;
+}
+
+const EMOJI_REGEX = new RegExp("\\p{Emoji}", "u");
+const LEADING_EMOJI_REGEX = new RegExp("^\\p{Emoji}\\s*", "u");
+
+function getEmoji(name = "") {
+  const match = name.match(EMOJI_REGEX);
+  return match ? match[0] : "👤";
+}
+
+function stripLeadingEmoji(name = "") {
+  return name.replace(LEADING_EMOJI_REGEX, "").trim();
+}
+
+function getNowHHMM() {
+  const now = new Date();
+  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+}
+
+function generatePeerCode() {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const first = letters[Math.floor(Math.random() * letters.length)];
+  const second = letters[Math.floor(Math.random() * letters.length)];
+  const tail = Array.from({ length: 4 }, () => digits[Math.floor(Math.random() * digits.length)]).join("");
+  return `${first}${second}-${tail}`;
+}
+
+function normalizePeerCode(value = "") {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+}
+
+function displayPeerCode(value = "") {
+  const normalized = normalizePeerCode(value);
+  if (!normalized) return "";
+  if (normalized.length <= 2) return normalized;
+  return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
+}
+
+function ShieldIcon({ size = 14, color = COLORS.accent }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.25C17.25 22.15 21 17.25 21 12V7L12 2z"
+        fill={color}
+        fillOpacity="0.15"
+        stroke={color}
+        strokeWidth="1.5"
+      />
+      <path d="M9 12l2 2 4-4" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LockIcon({ size = 11 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="5" y="11" width="14" height="10" rx="2.5" fill={COLORS.accent} fillOpacity="0.15" stroke={COLORS.accent} strokeWidth="1.5" />
+      <path d="M8 11V8a4 4 0 118 0v3" stroke={COLORS.accent} strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="12" cy="16" r="1.4" fill={COLORS.accent} />
+    </svg>
+  );
+}
+
+function WifiIcon({ active }) {
+  const color = active ? COLORS.accent : COLORS.textMuted;
+  return (
+    <svg width="15" height="11" viewBox="0 0 18 12" fill="none" aria-hidden>
+      <path d="M1 4.5C5.8 1 12.2 1 17 4.5" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M4 7c3.2-2.2 6.8-2.2 10 0" stroke={color} strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="9" cy="10" r="1.2" fill={color} />
+    </svg>
+  );
+}
+
+function OnlineDot({ online }) {
+  return (
+    <span
+      style={{
+        width: 10,
+        height: 10,
+        borderRadius: "50%",
+        position: "absolute",
+        bottom: 0,
+        right: 0,
+        background: online ? COLORS.accent : COLORS.textMuted,
+        boxShadow: online ? `0 0 6px ${COLORS.accent}` : "none",
+        border: `2px solid ${COLORS.bg}`,
+      }}
+    />
+  );
+}
+
+function Avatar({ name, size = 42, online }) {
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <div
+        style={{
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          background: `linear-gradient(135deg, ${COLORS.card}, ${COLORS.border})`,
+          border: `1.5px solid ${COLORS.border}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: size * 0.45,
+        }}
+      >
+        {getEmoji(name)}
+      </div>
+      {typeof online === "boolean" && <OnlineDot online={online} />}
+    </div>
+  );
+}
+
+function MatrixBackground() {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+
+    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノ<>{}[]()=+-*/&|^~ABCDEFabcdef";
+    const fontSize = 13;
+    const columnsWidth = 13;
+    let drops = [];
+    let frameId = 0;
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const columns = Math.floor(canvas.width / columnsWidth);
+      drops = Array.from({ length: columns }, () => Math.floor(Math.random() * canvas.height));
+    };
+
+    const draw = () => {
+      ctx.fillStyle = "rgba(5, 8, 16, 0.18)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.font = '13px "Fira Code", "Courier New", monospace';
+
+      for (let i = 0; i < drops.length; i += 1) {
+        const text = chars[Math.floor(Math.random() * chars.length)];
+        const opacity = (Math.random() * (0.5 - 0.15) + 0.15).toFixed(2);
+        ctx.fillStyle = Math.random() < 0.03 ? "#ffffff" : `rgba(0,255,178,${opacity})`;
+        const x = i * columnsWidth;
+        const y = drops[i];
+        ctx.fillText(text, x, y);
+        drops[i] = y + fontSize;
+
+        if (drops[i] > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0;
+        }
+      }
+
+      frameId = window.requestAnimationFrame(draw);
+    };
+
+    resize();
+    draw();
+    window.addEventListener("resize", resize);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }} />;
+}
+
+function IDETabBar() {
+  const tabs = [
+    { name: "ghost_chat.tsx", active: true },
+    { name: "tunnel.ws.ts", active: false },
+    { name: "crypto.util.ts", active: false },
+    { name: "// README", active: false },
+  ];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 34,
+        zIndex: 1,
+        pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "flex", gap: 6, padding: "0 14px" }}>
+        {["#FF5F57", "#FFBD2E", "#28C840"].map((dot) => (
+          <span key={dot} style={{ width: 11, height: 11, borderRadius: "50%", background: dot, opacity: 0.7 }} />
+        ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        {tabs.map((tab) => (
+          <div
+            key={tab.name}
+            style={{
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 11,
+              color: tab.active ? "#4EC9B0" : "#3a4a3a",
+              borderBottom: tab.active ? "2px solid #00FFB2" : "2px solid transparent",
+              paddingBottom: 5,
+            }}
+          >
+            {tab.name}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14, paddingRight: 14 }}>
+        {["Ln 247, Col 18", "UTF-8", "TypeScript", "⚡ E2E"].map((item) => (
+          <div
+            key={item}
+            style={{
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 10,
+              color: item === "⚡ E2E" ? COLORS.accent : "#2a4a2a",
+            }}
+          >
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IDEGutter() {
+  const colorCycle = ["#6A9955", "#569CD6", "#4EC9B0"];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 260,
+        zIndex: 1,
+        pointerEvents: "none",
+        overflow: "hidden",
+        padding: "20px 0",
+      }}
+    >
+      {Array.from({ length: 60 }).map((_, i) => (
+        <div key={`left-${i}`} style={{ height: 19, display: "flex", alignItems: "center", paddingLeft: 12 }}>
+          <span
+            style={{
+              minWidth: 22,
+              textAlign: "right",
+              marginRight: 8,
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 10,
+              color: "#2a3a2a",
+            }}
+          >
+            {i + 1}
+          </span>
+          <span
+            style={{
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 10,
+              color: colorCycle[i % 3],
+              opacity: 0.45,
+              whiteSpace: "nowrap",
+            }}
+          >
+            {LEFT_SNIPPETS[i % LEFT_SNIPPETS.length]}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IDEGutterRight() {
+  const colorCycle = ["#CE9178", "#C586C0", "#DCDCAA", "#4EC9B0"];
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 260,
+        zIndex: 1,
+        pointerEvents: "none",
+        overflow: "hidden",
+        padding: "20px 0",
+      }}
+    >
+      {Array.from({ length: 60 }).map((_, i) => (
+        <div key={`right-${i}`} style={{ height: 19, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 12 }}>
+          <span
+            style={{
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 10,
+              color: colorCycle[i % 4],
+              opacity: 0.45,
+              whiteSpace: "nowrap",
+              textAlign: "right",
+              marginRight: 8,
+            }}
+          >
+            {RIGHT_SNIPPETS[i % RIGHT_SNIPPETS.length]}
+          </span>
+          <span
+            style={{
+              minWidth: 22,
+              textAlign: "right",
+              fontFamily: '"Fira Code", monospace',
+              fontSize: 10,
+              color: "#2a3a2a",
+            }}
+          >
+            {i + 1}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function IDEStatusBar() {
+  const [clock, setClock] = useState(() => {
+    const now = new Date();
+    return now.toLocaleTimeString("en-GB", { hour12: false });
+  });
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = new Date();
+      setClock(now.toLocaleTimeString("en-GB", { hour12: false }));
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 22,
+        zIndex: 1,
+        pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        fontFamily: '"Fira Code", monospace',
+        fontSize: 10,
+      }}
+    >
+      <div style={{ color: COLORS.accent, fontWeight: 700, padding: "0 12px" }}>◈ GHOST_NET</div>
+      <div style={{ color: "#4EC9B0", marginRight: 12 }}>⎇ main</div>
+      <div style={{ color: COLORS.accent, marginRight: 12 }}>✓ E2E active</div>
+      <div style={{ color: "#569CD6", marginRight: 12 }}>⚡ wss://ghost.net</div>
+      <div style={{ color: "#DCDCAA" }}>🔒 AES-256-GCM</div>
+      <div style={{ marginLeft: "auto", color: "#2a4a2a", paddingRight: 12 }}>{clock}</div>
+    </div>
+  );
+}
+
+function StatusBar() {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 20px 4px", fontSize: 11, color: COLORS.textMuted, fontFamily: FONT }}>
+      <span>9:41</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <WifiIcon active />
+        <span style={{ color: COLORS.accent, fontSize: 10 }}>E2E</span>
+        <span>●●●</span>
+      </div>
+    </div>
+  );
+}
+
+function NavBar({ tab, onTab }) {
+  const items = [
+    { id: "chats", icon: "💬", label: "Chats" },
+    { id: "search", icon: "🔍", label: "Search" },
+    { id: "codegen", icon: "🔑", label: "Keys" },
+    { id: "groups", icon: "👥", label: "Groups" },
+    { id: "profile", icon: "🦅", label: "Profile" },
+  ];
+
+  return (
+    <div style={{ display: "flex", background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, padding: "6px 0 10px" }}>
+      {items.map((item) => {
+        const active = item.id === tab;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => onTab(item.id)}
+            style={{
+              flex: 1,
+              background: "none",
+              border: "none",
+              color: COLORS.textMuted,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 2,
+              cursor: "pointer",
+            }}
+          >
+            <span style={{ fontSize: 18, filter: active ? "none" : "grayscale(1)", opacity: active ? 1 : 0.5 }}>{item.icon}</span>
+            <span style={{ fontFamily: FONT, fontSize: 9, letterSpacing: 0.5, color: active ? COLORS.accent : COLORS.textMuted }}>{item.label}</span>
+            <span style={{ width: 16, height: 2, borderRadius: 999, background: active ? COLORS.accent : "transparent" }} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChatsScreen({ onOpen, onRegisterRoom }) {
+  const [showNew, setShowNew] = useState(false);
+  const [peerCode, setPeerCode] = useState("");
+  const [handle, setHandle] = useState("");
+  const [emoji, setEmoji] = useState("🦊");
+  const [hovered, setHovered] = useState(null);
+
+  const emojiOptions = ["🦊", "🐺", "🌙", "🔥", "⚡", "🎭", "🐉", "🦋", "🛸", "💀", "🐍", "🧠"];
+
+  const openNewTunnel = () => {
+    if (!handle.trim() && !peerCode.trim()) return;
+    const resolvedCode = displayPeerCode(peerCode) || generatePeerCode();
+    const newChat = {
+      id: Date.now(),
+      name: `${emoji} ${handle.trim() || "Ghost"}`,
+      last: "New tunnel opened",
+      time: "now",
+      unread: 0,
+      online: true,
+      code: resolvedCode,
+    };
+    onRegisterRoom(newChat, resolvedCode);
+    onOpen(newChat);
+    setShowNew(false);
+    setPeerCode("");
+    setHandle("");
+    setEmoji("🦊");
+  };
+
+  return (
+    <div style={{ paddingBottom: 14, position: "relative", minHeight: "100%" }}>
+      <div style={{ padding: "16px 20px 8px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <div style={{ fontFamily: FONT, fontSize: 20, fontWeight: 700, letterSpacing: -0.5, color: COLORS.text }}>
+            GHOST<span style={{ color: COLORS.accent }}>CHAT</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2, color: COLORS.textMuted, fontFamily: SANS, fontSize: 10 }}>
+            <ShieldIcon size={10} color={COLORS.accent} />
+            <span>All tunnels encrypted</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowNew(true)}
+          style={{
+            background: COLORS.accentDim,
+            border: `1px solid ${addAlpha(COLORS.accent, "40")}`,
+            borderRadius: 20,
+            padding: "6px 12px",
+            color: COLORS.accent,
+            fontFamily: FONT,
+            fontSize: 10,
+            cursor: "pointer",
+          }}
+        >
+          + NEW
+        </button>
+      </div>
+
+      <div style={{ padding: "0 12px" }}>
+        {CHATS.map((c) => (
+          <div
+            key={c.id}
+            role="button"
+            tabIndex={0}
+            onMouseEnter={() => setHovered(c.id)}
+            onMouseLeave={() => setHovered(null)}
+            onClick={() => onOpen(c)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onOpen(c);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 12px",
+              borderRadius: 14,
+              cursor: "pointer",
+              background: hovered === c.id ? COLORS.card : "transparent",
+            }}
+          >
+            <Avatar name={c.name} size={42} online={c.online} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{c.name}</div>
+                <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted }}>{c.time}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2, gap: 10 }}>
+                <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.last}</div>
+                {c.unread > 0 && (
+                  <span
+                    style={{
+                      background: COLORS.accent,
+                      color: COLORS.bg,
+                      borderRadius: 10,
+                      fontFamily: FONT,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "1px 6px",
+                    }}
+                  >
+                    {c.unread}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, padding: "12px 12px 4px" }}>GROUPS</div>
+
+      <div style={{ padding: "0 12px" }}>
+        {GROUPS.map((g) => (
+          <div
+            key={g.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "10px 12px",
+              borderRadius: 14,
+              cursor: "pointer",
+              background: hovered === g.id ? COLORS.card : "transparent",
+            }}
+            onMouseEnter={() => setHovered(g.id)}
+            onMouseLeave={() => setHovered(null)}
+          >
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: "50%",
+                background: COLORS.purpleDim,
+                border: `1.5px solid ${addAlpha(COLORS.purple, "40")}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 18,
+                flexShrink: 0,
+              }}
+            >
+              {getEmoji(g.name)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{g.name}</div>
+                <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted }}>{g.time}</div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 2, gap: 10 }}>
+                <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.last}</div>
+                {g.unread > 0 && (
+                  <span
+                    style={{
+                      background: COLORS.purple,
+                      color: "#fff",
+                      borderRadius: 10,
+                      fontFamily: FONT,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "1px 6px",
+                    }}
+                  >
+                    {g.unread}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showNew && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: "rgba(8,11,18,0.96)",
+            zIndex: 50,
+            display: "flex",
+            flexDirection: "column",
+            padding: "24px 20px",
+            gap: 16,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: COLORS.text }}>
+              NEW <span style={{ color: COLORS.accent }}>TUNNEL</span>
+            </div>
+            <button type="button" onClick={() => setShowNew(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, fontSize: 20, cursor: "pointer" }}>
+              ✕
+            </button>
+          </div>
+
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 8 }}>PICK AVATAR</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {emojiOptions.map((e) => (
+                <button
+                  key={e}
+                  type="button"
+                  onClick={() => setEmoji(e)}
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 10,
+                    fontSize: 20,
+                    cursor: "pointer",
+                    border: `1.5px solid ${emoji === e ? COLORS.accent : COLORS.border}`,
+                    background: emoji === e ? COLORS.accentDim : COLORS.card,
+                  }}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>USERNAME</div>
+            <input
+              value={handle}
+              onChange={(e) => setHandle(e.target.value)}
+              placeholder="Enter ghost handle"
+              style={{
+                width: "100%",
+                background: COLORS.card,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 12,
+                padding: "10px 14px",
+                fontFamily: SANS,
+                fontSize: 13,
+                color: COLORS.text,
+                outlineColor: COLORS.accent,
+              }}
+            />
+          </div>
+
+          <div>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>PEER CODE (optional)</div>
+            <input
+              value={peerCode}
+              onChange={(e) => setPeerCode(e.target.value.toUpperCase())}
+              placeholder="XX-0000"
+              style={{
+                width: "100%",
+                background: COLORS.card,
+                border: `1px solid ${addAlpha(COLORS.accent, "40")}`,
+                borderRadius: 12,
+                padding: "10px 14px",
+                fontFamily: FONT,
+                letterSpacing: 3,
+                fontSize: 14,
+                color: COLORS.accent,
+                outlineColor: COLORS.accent,
+                textTransform: "uppercase",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={openNewTunnel}
+            style={{
+              marginTop: "auto",
+              border: "none",
+              cursor: "pointer",
+              background: `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
+              color: COLORS.bg,
+              fontFamily: FONT,
+              fontSize: 13,
+              fontWeight: 700,
+              borderRadius: 14,
+              padding: 13,
+            }}
+          >
+            OPEN TUNNEL →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChatRoom({ chat, onBack }) {
+  const [msg, setMsg] = useState("");
+  const [messages, setMessages] = useState(chat?.seedMessages || MESSAGES);
+  const [typing, setTyping] = useState(false);
+  const endRef = useRef(null);
+  const timeoutRef = useRef([]);
+
+  useEffect(() => {
+    setMessages(chat?.seedMessages || MESSAGES);
+    setMsg("");
+    setTyping(false);
+  }, [chat?.id]);
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, typing]);
+
+  useEffect(
+    () => () => {
+      timeoutRef.current.forEach((t) => window.clearTimeout(t));
+    },
+    []
+  );
+
+  useEffect(() => {
+    const shredTimer = window.setInterval(() => {
+      const now = Date.now();
+      setMessages((prev) => prev.filter((item) => !item.expiresAt || item.expiresAt > now));
+    }, 5000);
+    return () => window.clearInterval(shredTimer);
+  }, []);
+
+  const send = () => {
+    const text = msg.trim();
+    if (!text) return;
+    const mine = { id: Date.now(), from: "me", text, time: getNowHHMM(), read: false, expiresAt: Date.now() + 45000 };
+    setMessages((prev) => [...prev, mine]);
+    setMsg("");
+
+    const t1 = window.setTimeout(() => setTyping(true), 500);
+    const t2 = window.setTimeout(() => {
+      setTyping(false);
+      setMessages((prev) => {
+        const marked = prev.map((item) => (item.from === "me" && !item.read ? { ...item, read: true } : item));
+        return [...marked, { id: Date.now() + 1, from: "them", text: "got it 👍", time: getNowHHMM(), read: false, expiresAt: Date.now() + 45000 }];
+      });
+    }, 2000);
+
+    timeoutRef.current.push(t1, t2);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 16px",
+          borderBottom: `1px solid ${COLORS.border}`,
+          background: COLORS.surface,
+        }}
+      >
+        <button type="button" onClick={onBack} style={{ color: COLORS.accent, fontSize: 20, background: "none", border: "none", cursor: "pointer" }}>
+          ←
+        </button>
+        <Avatar name={chat.name} size={36} online={chat.online} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{chat.name}</div>
+          <div style={{ fontFamily: FONT, fontSize: 10, color: chat.online ? COLORS.accent : COLORS.textMuted }}>
+            {chat.online ? "online" : "offline"}
+            {chat.code ? ` • ${chat.code}` : ""}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, background: COLORS.accentDim, borderRadius: 12, padding: "4px 8px" }}>
+          <LockIcon size={11} />
+          <span style={{ fontFamily: FONT, fontSize: 9, color: COLORS.accent }}>E2E</span>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: 0, display: "flex", flexDirection: "column", gap: 0 }}>
+        <div style={{ alignSelf: "center", marginTop: 10, marginBottom: 8, fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, background: COLORS.card, borderRadius: 8, padding: "3px 10px" }}>
+          🔒 Secure tunnel established
+        </div>
+
+        {messages.map((m) => (
+          <div key={m.id} style={{ display: "flex", justifyContent: m.from === "me" ? "flex-end" : "flex-start", padding: "0 10px" }}>
+            <div style={{ maxWidth: "72%", background: "transparent", border: "none", padding: "4px 8px" }}>
+              <div style={{ fontFamily: SANS, fontSize: 13, color: m.from === "me" ? "#39FF14" : "#00BFFF", lineHeight: 1.4 }}>{m.text}</div>
+              <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, textAlign: "right", marginTop: 2 }}>
+                {m.time}
+                {m.from === "me" ? ` ${m.read ? "✓✓" : "✓"}` : ""}
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {typing && (
+          <div style={{ display: "flex", justifyContent: "flex-start", padding: "0 10px" }}>
+            <div style={{ background: "transparent", border: "none", padding: "4px 8px", display: "flex", gap: 4 }}>
+              {[0, 1, 2].map((d) => (
+                <span
+                  key={`dot-${d}`}
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: COLORS.accent,
+                    animation: "bounce 0.8s infinite",
+                    animationDelay: `${d * 0.2}s`,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div ref={endRef} />
+      </div>
+
+      <div
+        style={{
+          padding: "8px 12px 12px",
+          borderTop: `1px solid ${COLORS.border}`,
+          background: COLORS.surface,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <button
+          type="button"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            background: COLORS.card,
+            border: `1px solid ${COLORS.border}`,
+            color: COLORS.textMuted,
+            cursor: "pointer",
+          }}
+        >
+          📎
+        </button>
+        <input
+          value={msg}
+          onChange={(e) => setMsg(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") send();
+          }}
+          placeholder="Type securely..."
+          style={{
+            flex: 1,
+            background: COLORS.card,
+            border: `1px solid ${COLORS.border}`,
+            borderRadius: 20,
+            padding: "9px 14px",
+            fontFamily: SANS,
+            fontSize: 13,
+            color: COLORS.text,
+            outline: "none",
+          }}
+        />
+        <button
+          type="button"
+          onClick={send}
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: "50%",
+            border: "none",
+            cursor: "pointer",
+            background: msg.trim() ? COLORS.accent : COLORS.card,
+            color: msg.trim() ? COLORS.bg : COLORS.textMuted,
+          }}
+        >
+          ➤
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SearchScreen({ roomDirectory, onJoinRoom }) {
+  const [query, setQuery] = useState("");
+  const [code, setCode] = useState("");
+  const [results, setResults] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [status, setStatus] = useState("");
+
+  const search = () => {
+    setScanning(true);
+    setResults([]);
+    setStatus("");
+    window.setTimeout(() => {
+      const normalizedCode = normalizePeerCode(code);
+      if (normalizedCode && roomDirectory[normalizedCode] && !query.trim()) {
+        setStatus("Joining secure tunnel...");
+        setScanning(false);
+        onJoinRoom(roomDirectory[normalizedCode]);
+        return;
+      }
+
+      const pool = [
+        ...SEARCH_RESULTS.map((item) => ({
+          ...item,
+          chat: { id: item.id, name: item.name, online: true, unread: 0, time: "now", last: "Tunnel available", code: item.code },
+        })),
+        ...Object.values(roomDirectory).map((room) => ({
+          id: `room-${room.id}`,
+          name: room.name,
+          code: room.code,
+          mutual: room.isGroup ? room.members || 0 : 0,
+          chat: room,
+        })),
+      ];
+
+      let filtered = pool;
+      if (query.trim()) {
+        const q = query.trim().toLowerCase();
+        filtered = filtered.filter((item) => item.name.toLowerCase().includes(q));
+      }
+      if (normalizedCode) {
+        filtered = filtered.filter((item) => normalizePeerCode(item.code) === normalizedCode);
+        if (filtered.length === 0) {
+          setStatus("No active tunnel found for that code");
+        } else {
+          setStatus("Tunnel found — tap CONNECT to join");
+        }
+      }
+
+      const deduped = filtered.filter((item, idx, arr) => arr.findIndex((x) => normalizePeerCode(x.code) === normalizePeerCode(item.code)) === idx);
+      setResults(deduped);
+      setScanning(false);
+    }, 1200);
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
+        FIND <span style={{ color: COLORS.accent }}>USERS</span>
+      </div>
+      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Search by emoji username or peer code</div>
+
+      {status && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>{status}</div>}
+
+      <div style={{ marginTop: 14, background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${COLORS.border}` }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>EMOJI USERNAME</div>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="🦊 Phantom ..."
+          style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 13, outline: "none" }}
+        />
+      </div>
+
+      <div style={{ textAlign: "center", margin: "10px 0", fontFamily: FONT, fontSize: 9, color: COLORS.textMuted }}>— OR —</div>
+
+      <div style={{ background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${addAlpha(COLORS.accent, "30")}` }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 6 }}>PEER CODE</div>
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          placeholder="XX-0000"
+          style={{
+            width: "100%",
+            background: COLORS.surface,
+            border: `1px solid ${addAlpha(COLORS.accent, "30")}`,
+            borderRadius: 10,
+            padding: "9px 12px",
+            color: COLORS.accent,
+            fontFamily: FONT,
+            fontSize: 13,
+            letterSpacing: 2,
+            textTransform: "uppercase",
+            outline: "none",
+          }}
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={search}
+        style={{
+          width: "100%",
+          marginTop: 12,
+          border: "none",
+          cursor: "pointer",
+          background: `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
+          color: COLORS.bg,
+          fontFamily: FONT,
+          fontSize: 13,
+          borderRadius: 12,
+          padding: "12px 13px",
+        }}
+      >
+        🔍 SEARCH
+      </button>
+
+      {scanning && (
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          {[0, 1, 2].map((index) => (
+            <div
+              key={`scan-${index}`}
+              style={{
+                height: 10,
+                borderRadius: 999,
+                background: COLORS.card,
+                border: `1px solid ${COLORS.border}`,
+                animation: "bounce 0.9s infinite",
+                animationDelay: `${index * 0.2}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {!scanning && results.length > 0 && (
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+          {results.map((r) => (
+            <div key={r.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+              <Avatar name={r.name} size={40} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{r.name}</div>
+                <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>{r.code}</div>
+                {r.mutual > 0 && <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>{r.mutual} mutual tunnel{r.mutual > 1 ? "s" : ""}</div>}
+              </div>
+              <button
+                type="button"
+                onClick={() => onJoinRoom(r.chat)}
+                style={{
+                  background: COLORS.accentDim,
+                  border: `1px solid ${addAlpha(COLORS.accent, "50")}`,
+                  fontFamily: FONT,
+                  fontSize: 10,
+                  color: COLORS.accent,
+                  borderRadius: 10,
+                  padding: "7px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                CONNECT
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeGenScreen({ onGenerateRoom }) {
+  const [code, setCode] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [expiry, setExpiry] = useState(10);
+
+  const generateCode = () => {
+    if (generating) return;
+    setGenerating(true);
+    setCopied(false);
+
+    window.setTimeout(() => {
+      const nextCode = generatePeerCode();
+      setCode(nextCode);
+      onGenerateRoom(nextCode, expiry);
+      setGenerating(false);
+    }, 1200);
+  };
+
+  const copyCode = async () => {
+    if (!code) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+      }
+    } catch {
+      // intentionally ignored
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
+        SECURE <span style={{ color: COLORS.accent }}>KEY</span>
+      </div>
+      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Generate a one-time peer code to open a private tunnel</div>
+
+      <div
+        style={{
+          marginTop: 14,
+          background: `linear-gradient(135deg, ${COLORS.card}, #0A1428)`,
+          borderRadius: 20,
+          padding: "24px 20px",
+          border: `1px solid ${addAlpha(COLORS.accent, "30")}`,
+          textAlign: "center",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: -20,
+            right: -20,
+            width: 80,
+            height: 80,
+            borderRadius: "50%",
+            background: COLORS.accentGlow,
+            filter: "blur(20px)",
+          }}
+        />
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+          <ShieldIcon size={40} color={COLORS.accent} />
+        </div>
+
+        {code && !generating && (
+          <>
+            <div style={{ fontFamily: FONT, fontSize: 32, fontWeight: 700, color: COLORS.accent, letterSpacing: 6, textShadow: `0 0 20px ${addAlpha(COLORS.accent, "60")}` }}>{code}</div>
+            <div style={{ marginTop: 8, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Expires in {expiry} minutes or after single use</div>
+          </>
+        )}
+
+        {generating && <div style={{ fontFamily: FONT, fontSize: 14, color: COLORS.accent }}>● GENERATING...</div>}
+
+        {!code && !generating && <div style={{ fontFamily: FONT, fontSize: 24, color: COLORS.textMuted }}>_ _ - _ _ _ _</div>}
+      </div>
+
+      {code !== null && (
+        <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: "12px 14px" }}>
+          <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>EXPIRY DURATION</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[5, 10, 30, 60].map((min) => {
+              const selected = expiry === min;
+              return (
+                <button
+                  key={min}
+                  type="button"
+                  onClick={() => setExpiry(min)}
+                  style={{
+                    flex: 1,
+                    borderRadius: 10,
+                    border: `1px solid ${selected ? COLORS.accent : COLORS.border}`,
+                    background: selected ? COLORS.accentDim : COLORS.surface,
+                    color: selected ? COLORS.accent : COLORS.textMuted,
+                    fontFamily: FONT,
+                    fontSize: 11,
+                    padding: "8px 0",
+                    cursor: "pointer",
+                  }}
+                >
+                  {min}m
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={generateCode}
+        style={{
+          width: "100%",
+          marginTop: 12,
+          padding: 13,
+          borderRadius: 12,
+          border: "none",
+          cursor: "pointer",
+          fontFamily: FONT,
+          fontSize: 13,
+          fontWeight: 700,
+          letterSpacing: 1,
+          background: generating ? COLORS.card : `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
+          color: generating ? COLORS.accent : COLORS.bg,
+        }}
+      >
+        {generating ? "⟳ GENERATING..." : "⚡ GENERATE NEW CODE"}
+      </button>
+
+      {code !== null && (
+        <button
+          type="button"
+          onClick={copyCode}
+          style={{
+            width: "100%",
+            marginTop: 8,
+            padding: 12,
+            borderRadius: 12,
+            cursor: "pointer",
+            fontFamily: FONT,
+            fontSize: 12,
+            border: `1px solid ${copied ? COLORS.accent : COLORS.border}`,
+            background: copied ? COLORS.accentDim : COLORS.card,
+            color: copied ? COLORS.accent : COLORS.textMuted,
+          }}
+        >
+          {copied ? "✓ COPIED!" : "📋 COPY CODE"}
+        </button>
+      )}
+
+      <div style={{ marginTop: 18, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: 12 }}>
+        <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.accent, marginBottom: 8 }}>HOW IT WORKS</div>
+        {[
+          "Generate a unique peer code here",
+          "Share it securely with your contact",
+          "They enter it to open a private tunnel",
+          "Code expires & is destroyed after use",
+        ].map((step, i) => (
+          <div key={step} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: i === 3 ? 0 : 8 }}>
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: "50%",
+                background: COLORS.accentDim,
+                color: COLORS.accent,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: FONT,
+                fontSize: 10,
+              }}
+            >
+              {i + 1}
+            </span>
+            <span style={{ fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>{step}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GroupsScreen({ onCreateGroupRoom }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [selectedEmoji, setSelectedEmoji] = useState("🛸");
+  const [latestGroupCode, setLatestGroupCode] = useState("");
+
+  const options = ["🛸", "🌊", "🔥", "⚡", "🌙", "🦋", "🐺", "🦊", "🐉", "🎭", "💀", "🌌"];
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+        <div>
+          <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
+            SECURE <span style={{ color: COLORS.purple }}>GROUPS</span>
+          </div>
+          <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Encrypted group tunnels</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowCreate((v) => !v)}
+          style={{
+            background: COLORS.purpleDim,
+            border: `1px solid ${addAlpha(COLORS.purple, "40")}`,
+            color: COLORS.purple,
+            fontFamily: FONT,
+            fontSize: 10,
+            borderRadius: 20,
+            padding: "6px 12px",
+            cursor: "pointer",
+          }}
+        >
+          + CREATE
+        </button>
+      </div>
+
+      {showCreate && (
+        <div style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${addAlpha(COLORS.purple, "30")}`, padding: 16, marginTop: 12, marginBottom: 14 }}>
+          <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.purple, letterSpacing: 1, marginBottom: 8 }}>NEW GROUP</div>
+          <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 8 }}>PICK AVATAR</div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {options.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => setSelectedEmoji(emoji)}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  fontSize: 20,
+                  cursor: "pointer",
+                  border: `1.5px solid ${selectedEmoji === emoji ? COLORS.purple : COLORS.border}`,
+                  background: selectedEmoji === emoji ? COLORS.purpleDim : COLORS.card,
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+
+          <input
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder={`${selectedEmoji} Group name...`}
+            style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 13, outline: "none", marginBottom: 10 }}
+          />
+
+          <button
+            type="button"
+            onClick={() => {
+              const name = `${selectedEmoji} ${groupName.trim() || "Ghost Group"}`;
+              const codeValue = generatePeerCode();
+              onCreateGroupRoom({
+                id: Date.now(),
+                name,
+                members: 1,
+                online: true,
+                isGroup: true,
+                unread: 0,
+                last: "Group tunnel created",
+                time: "now",
+                code: codeValue,
+              });
+              setLatestGroupCode(codeValue);
+              setShowCreate(false);
+              setGroupName("");
+            }}
+            style={{
+              width: "100%",
+              border: "none",
+              cursor: "pointer",
+              background: `linear-gradient(135deg, ${COLORS.purple}, #7C3AED)`,
+              color: "#fff",
+              fontFamily: FONT,
+              fontSize: 12,
+              borderRadius: 10,
+              padding: 10,
+            }}
+          >
+            CREATE SECURE GROUP
+          </button>
+        </div>
+      )}
+
+      {latestGroupCode && (
+        <div style={{ marginBottom: 8, fontFamily: FONT, fontSize: 10, color: COLORS.purple }}>
+          New group tunnel code: {latestGroupCode}
+        </div>
+      )}
+
+      {GROUPS.map((group) => (
+        <div key={group.id} style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 14,
+                background: COLORS.purpleDim,
+                border: `1.5px solid ${addAlpha(COLORS.purple, "40")}`,
+                fontSize: 24,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {getEmoji(group.name)}
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{group.name}</div>
+              <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>{group.members} members • encrypted</div>
+            </div>
+
+            {group.unread > 0 && (
+              <span style={{ background: COLORS.purple, color: "#fff", borderRadius: 10, padding: "2px 7px", fontFamily: FONT, fontSize: 10 }}>{group.unread}</span>
+            )}
+          </div>
+
+          <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 10, paddingTop: 8, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>{group.last}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProfileScreen() {
+  const [username, setUsername] = useState("🦅 Falcon");
+  const [editing, setEditing] = useState(false);
+  const [tempName, setTempName] = useState("");
+  const [selectedEmoji, setSelectedEmoji] = useState("🦅");
+
+  const options = ["🦅", "🦊", "🐺", "🌙", "🔥", "⚡", "🎭", "🐉", "🦋", "🛸", "💀", "🌊"];
+
+  const save = () => {
+    setUsername(`${selectedEmoji} ${tempName.trim() || "Ghost"}`);
+    setEditing(false);
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
+        MY <span style={{ color: COLORS.accent }}>PROFILE</span>
+      </div>
+
+      <div
+        style={{
+          marginTop: 14,
+          background: `linear-gradient(135deg, ${COLORS.card}, #0A1428)`,
+          borderRadius: 20,
+          padding: "24px 20px",
+          border: `1px solid ${COLORS.border}`,
+          textAlign: "center",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: -30,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 120,
+            height: 120,
+            borderRadius: "50%",
+            background: COLORS.accentGlow,
+            filter: "blur(30px)",
+          }}
+        />
+
+        <div
+          style={{
+            width: 80,
+            height: 80,
+            margin: "0 auto",
+            borderRadius: "50%",
+            background: `linear-gradient(135deg, ${COLORS.accentDim}, ${COLORS.purpleDim})`,
+            border: `2px solid ${addAlpha(COLORS.accent, "50")}`,
+            fontSize: 38,
+            boxShadow: `0 0 20px ${addAlpha(COLORS.accent, "30")}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            position: "relative",
+          }}
+        >
+          {getEmoji(username)}
+          <span
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              background: COLORS.accent,
+              position: "absolute",
+              bottom: 6,
+              right: "calc(50% - 50px)",
+              color: COLORS.bg,
+              fontSize: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ✎
+          </span>
+        </div>
+
+        <div style={{ marginTop: 10, fontFamily: SANS, fontSize: 18, fontWeight: 700, color: COLORS.text }}>{username}</div>
+        <div style={{ marginTop: 4, fontFamily: FONT, fontSize: 11, color: COLORS.textMuted }}>
+          <span style={{ color: COLORS.accent }}>FA-7741</span> • peer code
+        </div>
+
+        <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 14, paddingTop: 12, display: "flex", justifyContent: "space-around" }}>
+          {[
+            ["1.2K", "Messages"],
+            ["47", "Tunnels"],
+            ["3", "Groups"],
+          ].map(([value, label]) => (
+            <div key={label}>
+              <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.accent }}>{value}</div>
+              <div style={{ fontFamily: SANS, fontSize: 10, color: COLORS.textMuted }}>{label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {editing ? (
+        <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 16, border: `1px solid ${addAlpha(COLORS.accent, "30")}`, padding: 16 }}>
+          <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, marginBottom: 8 }}>EDIT PROFILE</div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            {options.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                onClick={() => setSelectedEmoji(emoji)}
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  fontSize: 20,
+                  cursor: "pointer",
+                  border: `1.5px solid ${selectedEmoji === emoji ? COLORS.accent : COLORS.border}`,
+                  background: selectedEmoji === emoji ? COLORS.accentDim : COLORS.card,
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+
+          <input
+            value={tempName}
+            onChange={(e) => setTempName(e.target.value)}
+            style={{ width: "100%", background: COLORS.surface, border: `1px solid ${addAlpha(COLORS.accent, "40")}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 14, outline: "none", marginBottom: 10 }}
+          />
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              style={{
+                flex: 1,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 10,
+                background: COLORS.surface,
+                color: COLORS.textMuted,
+                fontFamily: FONT,
+                fontSize: 11,
+                cursor: "pointer",
+                padding: 10,
+              }}
+            >
+              CANCEL
+            </button>
+            <button
+              type="button"
+              onClick={save}
+              style={{
+                flex: 2,
+                border: "none",
+                borderRadius: 10,
+                background: `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
+                color: COLORS.bg,
+                fontFamily: FONT,
+                fontSize: 11,
+                cursor: "pointer",
+                padding: 10,
+              }}
+            >
+              SAVE CHANGES
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setEditing(true);
+            setTempName(stripLeadingEmoji(username));
+          }}
+          style={{
+            marginTop: 12,
+            width: "100%",
+            borderRadius: 12,
+            border: `1px solid ${addAlpha(COLORS.accent, "30")}`,
+            background: COLORS.card,
+            color: COLORS.accent,
+            fontFamily: FONT,
+            fontSize: 12,
+            cursor: "pointer",
+            padding: 11,
+          }}
+        >
+          ✎ EDIT USERNAME & AVATAR
+        </button>
+      )}
+
+      <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14 }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 4 }}>SECURITY</div>
+        {[
+          ["🔒", "End-to-end Encryption", "AES-256", true],
+          ["🌐", "WebSocket Tunnels", "WSS/TLS", true],
+          ["🧅", "Message Shredding", "On", true],
+          ["🕵️", "Stealth Mode", "Off", false],
+        ].map(([icon, label, value, active], i, arr) => (
+          <div
+            key={label}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "8px 0",
+              borderBottom: i === arr.length - 1 ? "none" : `1px solid ${COLORS.border}`,
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{icon}</span>
+            <span style={{ fontFamily: SANS, fontSize: 13, color: COLORS.text, flex: 1 }}>{label}</span>
+            <span style={{ fontFamily: FONT, fontSize: 10, color: active ? COLORS.accent : COLORS.textMuted }}>{value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function GhostChat() {
+  const [tab, setTab] = useState("chats");
+  const [activeChat, setActiveChat] = useState(null);
+  const [roomDirectory, setRoomDirectory] = useState(() => {
+    const seeded = {};
+    SEARCH_RESULTS.forEach((item) => {
+      const code = displayPeerCode(item.code);
+      const key = normalizePeerCode(code);
+      seeded[key] = {
+        id: item.id,
+        name: item.name,
+        code,
+        online: true,
+        unread: 0,
+        last: "Tunnel available",
+        time: "now",
+      };
+    });
+    return seeded;
+  });
+
+  useEffect(() => {
+    if (!document.getElementById("gc-fonts")) {
+      const link = document.createElement("link");
+      link.id = "gc-fonts";
+      link.rel = "stylesheet";
+      link.href =
+        "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&family=Fira+Code:wght@300;400;500&display=swap";
+      document.head.appendChild(link);
+    }
+  }, []);
+
+  const registerRoom = (chatLike, rawCode) => {
+    const code = displayPeerCode(rawCode || chatLike?.code || generatePeerCode());
+    const key = normalizePeerCode(code);
+    if (!key) return chatLike;
+    const room = {
+      ...chatLike,
+      code,
+      online: typeof chatLike?.online === "boolean" ? chatLike.online : true,
+      id: chatLike?.id || Date.now(),
+    };
+    setRoomDirectory((prev) => ({ ...prev, [key]: room }));
+    return room;
+  };
+
+  const openRoom = (chatLike) => {
+    if (!chatLike) return;
+    const room = chatLike.code ? registerRoom(chatLike, chatLike.code) : chatLike;
+    setActiveChat(room);
+    setTab("chats");
+  };
+
+  let content;
+  if (activeChat) {
+    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} />;
+  } else if (tab === "chats") {
+    content = <ChatsScreen onOpen={openRoom} onRegisterRoom={registerRoom} />;
+  } else if (tab === "search") {
+    content = <SearchScreen roomDirectory={roomDirectory} onJoinRoom={openRoom} />;
+  } else if (tab === "codegen") {
+    content =
+      <CodeGenScreen
+        onGenerateRoom={(codeValue, expiry) => {
+          registerRoom(
+            {
+              id: Date.now(),
+              name: "🧠 Ghost Link",
+              unread: 0,
+              time: "now",
+              last: `Secure key active ${expiry}m`,
+              online: true,
+            },
+            codeValue
+          );
+        }}
+      />;
+  } else if (tab === "groups") {
+    content = <GroupsScreen onCreateGroupRoom={registerRoom} />;
+  } else {
+    content = <ProfileScreen />;
+  }
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        width: "100%",
+        background: "#050810",
+        position: "relative",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <style>
+        {`* { box-sizing: border-box; margin: 0; padding: 0; }
+::-webkit-scrollbar { width: 0; }
+input::placeholder { color: #4B5563; }
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}`}
+      </style>
+
+      <MatrixBackground />
+      <IDETabBar />
+      <IDEGutter />
+      <IDEGutterRight />
+      <IDEStatusBar />
+
+      <div
+        style={{
+          width: 375,
+          height: 780,
+          background: COLORS.bg,
+          borderRadius: 40,
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: `0 0 60px ${COLORS.accent}20, 0 0 100px rgba(0,255,178,0.07), 0 40px 80px rgba(0,0,0,0.9)`,
+          border: `1px solid ${COLORS.border}`,
+          position: "relative",
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: 120,
+            height: 28,
+            background: COLORS.surface,
+            borderRadius: "0 0 20px 20px",
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+          }}
+        >
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.border }} />
+          <span style={{ width: 40, height: 5, borderRadius: 999, background: COLORS.border }} />
+        </div>
+
+        <StatusBar />
+
+        <div style={{ flex: 1, overflowY: "auto" }}>{content}</div>
+
+        {!activeChat && <NavBar tab={tab} onTab={setTab} />}
+      </div>
+    </div>
+  );
+}

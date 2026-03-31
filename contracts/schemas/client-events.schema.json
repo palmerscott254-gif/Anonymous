@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ghostchat.local/schemas/client-events.schema.json",
+  "title": "GhostChat Client -> Server Events",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/sessionHelloEnvelope" },
+    { "$ref": "#/$defs/roomGenerateCodeEnvelope" },
+    { "$ref": "#/$defs/roomJoinEnvelope" },
+    { "$ref": "#/$defs/roomLeaveEnvelope" },
+    { "$ref": "#/$defs/msgSendEnvelope" },
+    { "$ref": "#/$defs/typingSetEnvelope" },
+    { "$ref": "#/$defs/profileUpdateEnvelope" },
+    { "$ref": "#/$defs/groupCreateEnvelope" },
+    { "$ref": "#/$defs/groupJoinEnvelope" },
+    { "$ref": "#/$defs/msgReadEnvelope" }
+  ],
+  "$defs": {
+    "baseEnvelope": {
+      "type": "object",
+      "required": ["v", "event", "ts", "data"],
+      "properties": {
+        "v": { "const": "1.0" },
+        "event": { "type": "string" },
+        "reqId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "ts": { "type": "integer", "minimum": 0 },
+        "data": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "emojiIdentity": {
+      "type": "object",
+      "required": ["username", "emoji"],
+      "properties": {
+        "username": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "emoji": { "type": "string", "minLength": 1, "maxLength": 4 },
+        "avatarUrl": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "sessionHelloEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "session.hello" },
+            "data": {
+              "type": "object",
+              "required": ["deviceId", "identity"],
+              "properties": {
+                "deviceId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "appVersion": { "type": "string", "maxLength": 30 },
+                "identity": { "$ref": "#/$defs/emojiIdentity" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomGenerateCodeEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.generate_code" },
+            "data": {
+              "type": "object",
+              "required": ["kind", "ttlMinutes"],
+              "properties": {
+                "kind": { "enum": ["direct", "group"] },
+                "ttlMinutes": { "type": "integer", "enum": [5, 10, 30, 60] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "roomJoinData": {
+      "type": "object",
+      "required": ["roomCode", "identity"],
+      "properties": {
+        "roomCode": { "type": "string", "pattern": "^[A-Z]{2}-[2-9]{4}$" },
+        "identity": { "$ref": "#/$defs/emojiIdentity" }
+      },
+      "additionalProperties": false
+    },
+    "roomJoinEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        { "properties": { "event": { "const": "room.join" }, "data": { "$ref": "#/$defs/roomJoinData" } } }
+      ]
+    },
+    "groupJoinEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        { "properties": { "event": { "const": "group.join" }, "data": { "$ref": "#/$defs/roomJoinData" } } }
+      ]
+    },
+    "roomLeaveEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "room.leave" },
+            "data": {
+              "type": "object",
+              "required": ["roomId"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "msgSendEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "msg.send" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "clientMsgId", "bodyCiphertext", "sentAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "clientMsgId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "bodyCiphertext": { "type": "string", "minLength": 1 },
+                "nonce": { "type": "string", "minLength": 1, "maxLength": 256 },
+                "sentAt": { "type": "integer", "minimum": 0 },
+                "autoShredSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "typingSetEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "typing.set" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "isTyping"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "isTyping": { "type": "boolean" }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "profileUpdateEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "profile.update" },
+            "data": { "$ref": "#/$defs/emojiIdentity" }
+          }
+        }
+      ]
+    },
+    "groupCreateEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "group.create" },
+            "data": {
+              "type": "object",
+              "required": ["name", "emoji", "ttlMinutes"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+                "emoji": { "type": "string", "minLength": 1, "maxLength": 4 },
+                "ttlMinutes": { "type": "integer", "enum": [5, 10, 30, 60] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    },
+    "msgReadEnvelope": {
+      "allOf": [
+        { "$ref": "#/$defs/baseEnvelope" },
+        {
+          "properties": {
+            "event": { "const": "msg.read" },
+            "data": {
+              "type": "object",
+              "required": ["roomId", "msgId", "readAt"],
+              "properties": {
+                "roomId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "msgId": { "type": "string", "minLength": 1, "maxLength": 80 },
+                "readAt": { "type": "integer", "minimum": 0 }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}
