@@ -206,9 +206,10 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   const [peerCode, setPeerCode] = useState("");
   const [hovered, setHovered] = useState(null);
   const [tunnelError, setTunnelError] = useState("");
+  const normalizedCode = normalizePeerCode(peerCode);
+  const canOpenTunnel = normalizedCode.length === 6;
 
   const openNewTunnel = () => {
-    const normalizedCode = normalizePeerCode(peerCode);
     if (normalizedCode.length !== 6) {
       setTunnelError("Peer code is required (format: XX-0000)");
       return;
@@ -436,12 +437,13 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
           <button
             type="button"
             onClick={openNewTunnel}
+            disabled={!canOpenTunnel}
             style={{
               marginTop: "auto",
               border: "none",
-              cursor: "pointer",
-              background: `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
-              color: COLORS.bg,
+              cursor: canOpenTunnel ? "pointer" : "not-allowed",
+              background: canOpenTunnel ? `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)` : COLORS.card,
+              color: canOpenTunnel ? COLORS.bg : COLORS.textMuted,
               fontFamily: FONT,
               fontSize: 13,
               fontWeight: 700,
