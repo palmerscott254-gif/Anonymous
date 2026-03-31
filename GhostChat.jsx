@@ -204,18 +204,19 @@ function NavBar({ tab, onTab }) {
 function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   const [showNew, setShowNew] = useState(false);
   const [peerCode, setPeerCode] = useState("");
-  const [handle, setHandle] = useState("");
-  const [emoji, setEmoji] = useState("🦊");
   const [hovered, setHovered] = useState(null);
-
-  const emojiOptions = ["🦊", "🐺", "🌙", "🔥", "⚡", "🎭", "🐉", "🦋", "🛸", "💀", "🐍", "🧠"];
+  const [tunnelError, setTunnelError] = useState("");
 
   const openNewTunnel = () => {
-    if (!handle.trim() && !peerCode.trim()) return;
-    const resolvedCode = displayPeerCode(peerCode) || generatePeerCode();
+    const normalizedCode = normalizePeerCode(peerCode);
+    if (normalizedCode.length !== 6) {
+      setTunnelError("Peer code is required (format: XX-0000)");
+      return;
+    }
+    const resolvedCode = displayPeerCode(normalizedCode);
     const newChat = {
       id: Date.now(),
-      name: `${emoji} ${handle.trim() || "Ghost"}`,
+      name: `🔐 Peer ${resolvedCode}`,
       last: "New tunnel opened",
       time: "now",
       unread: 0,
@@ -226,8 +227,7 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
     onOpen(newChat);
     setShowNew(false);
     setPeerCode("");
-    setHandle("");
-    setEmoji("🦊");
+    setTunnelError("");
   };
 
   return (
@@ -408,54 +408,13 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
           </div>
 
           <div>
-            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 8 }}>PICK AVATAR</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-              {emojiOptions.map((e) => (
-                <button
-                  key={e}
-                  type="button"
-                  onClick={() => setEmoji(e)}
-                  style={{
-                    width: 38,
-                    height: 38,
-                    borderRadius: 10,
-                    fontSize: 20,
-                    cursor: "pointer",
-                    border: `1.5px solid ${emoji === e ? COLORS.accent : COLORS.border}`,
-                    background: emoji === e ? COLORS.accentDim : COLORS.card,
-                  }}
-                >
-                  {e}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>USERNAME</div>
-            <input
-              value={handle}
-              onChange={(e) => setHandle(e.target.value)}
-              placeholder="Enter ghost handle"
-              style={{
-                width: "100%",
-                background: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
-                borderRadius: 12,
-                padding: "10px 14px",
-                fontFamily: SANS,
-                fontSize: 13,
-                color: COLORS.text,
-                outlineColor: COLORS.accent,
-              }}
-            />
-          </div>
-
-          <div>
-            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>PEER CODE (optional)</div>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>PEER CODE (required)</div>
             <input
               value={peerCode}
-              onChange={(e) => setPeerCode(displayPeerCode(e.target.value))}
+              onChange={(e) => {
+                setPeerCode(displayPeerCode(e.target.value));
+                if (tunnelError) setTunnelError("");
+              }}
               placeholder="XX-0000"
               style={{
                 width: "100%",
@@ -471,6 +430,7 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
                 textTransform: "uppercase",
               }}
             />
+            {tunnelError && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.red }}>{tunnelError}</div>}
           </div>
 
           <button
@@ -690,7 +650,6 @@ function ChatRoom({ chat, onBack, settings, onMessageSent }) {
 }
 
 function SearchScreen({ roomDirectory, onJoinRoom }) {
-  const [query, setQuery] = useState("");
   const [code, setCode] = useState("");
   const [results, setResults] = useState([]);
   const [scanning, setScanning] = useState(false);
@@ -702,7 +661,13 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
     setStatus("");
     window.setTimeout(() => {
       const normalizedCode = normalizePeerCode(code);
-      if (normalizedCode && roomDirectory[normalizedCode] && !query.trim()) {
+      if (!normalizedCode) {
+        setStatus("Peer code is required");
+        setScanning(false);
+        return;
+      }
+
+      if (roomDirectory[normalizedCode]) {
         setStatus("Joining secure tunnel...");
         setScanning(false);
         onJoinRoom(roomDirectory[normalizedCode]);
@@ -723,24 +688,17 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
         })),
       ];
 
-      let filtered = pool;
-      if (query.trim()) {
-        const q = query.trim().toLowerCase();
-        filtered = filtered.filter((item) => item.name.toLowerCase().includes(q));
-      }
-      if (normalizedCode) {
-        filtered = filtered.filter((item) => normalizePeerCode(item.code) === normalizedCode);
-        if (filtered.length === 0) {
-          setStatus("No active tunnel found for that code");
-        } else {
-          setStatus("Tunnel found — tap CONNECT to join");
-        }
+      const filtered = pool.filter((item) => normalizePeerCode(item.code) === normalizedCode);
+      if (filtered.length === 0) {
+        setStatus("No active tunnel found for that code");
+      } else {
+        setStatus("Tunnel found — tap CONNECT to join");
       }
 
       const seen = new Set();
       const deduped = filtered.filter((item) => {
         const normalized = normalizePeerCode(item.code);
-        const dedupeKey = normalized || item.name.toLowerCase();
+        const dedupeKey = normalized || item.id;
         if (seen.has(dedupeKey)) return false;
         seen.add(dedupeKey);
         return true;
@@ -753,25 +711,13 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
   return (
     <div style={{ padding: 16 }}>
       <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.text }}>
-        FIND <span style={{ color: COLORS.accent }}>USERS</span>
+        JOIN VIA <span style={{ color: COLORS.accent }}>PEER CODE</span>
       </div>
-      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Search by emoji username or peer code</div>
+      <div style={{ marginTop: 4, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Username lookup is disabled for privacy</div>
 
       {status && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>{status}</div>}
 
-      <div style={{ marginTop: 14, background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${COLORS.border}` }}>
-        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>EMOJI USERNAME</div>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="🦊 Phantom ..."
-          style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 13, outline: "none" }}
-        />
-      </div>
-
-      <div style={{ textAlign: "center", margin: "10px 0", fontFamily: FONT, fontSize: 9, color: COLORS.textMuted }}>— OR —</div>
-
-      <div style={{ background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${addAlpha(COLORS.accent, "30")}` }}>
+      <div style={{ marginTop: 14, background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${addAlpha(COLORS.accent, "30")}` }}>
         <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 6 }}>PEER CODE</div>
         <input
           value={code}
@@ -861,7 +807,7 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
         </div>
       )}
 
-      {!scanning && results.length === 0 && (query.trim() || code.trim()) && !status && (
+      {!scanning && results.length === 0 && code.trim() && !status && (
         <div style={{ marginTop: 14, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>
           No matching rooms found.
         </div>
