@@ -823,13 +823,13 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
 function CodeGenScreen({ onGenerateRoom }) {
   const [code, setCode] = useState(null);
   const [generating, setGenerating] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState("idle");
   const [expiry, setExpiry] = useState(10);
 
   const generateCode = () => {
     if (generating) return;
     setGenerating(true);
-    setCopied(false);
+    setCopyState("idle");
 
     window.setTimeout(() => {
       const nextCode = generatePeerCode();
@@ -841,15 +841,37 @@ function CodeGenScreen({ onGenerateRoom }) {
 
   const copyCode = async () => {
     if (!code) return;
+    let copied = false;
     try {
       if (navigator?.clipboard?.writeText) {
         await navigator.clipboard.writeText(code);
+        copied = true;
       }
     } catch {
-      // intentionally ignored
+      copied = false;
     }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+
+    if (!copied) {
+      try {
+        const textArea = document.createElement("textarea");
+        textArea.value = code;
+        textArea.setAttribute("readonly", "");
+        textArea.style.position = "fixed";
+        textArea.style.opacity = "0";
+        textArea.style.pointerEvents = "none";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        copied = document.execCommand("copy");
+        document.body.removeChild(textArea);
+      } catch {
+        copied = false;
+      }
+    }
+
+    setCopyState(copied ? "success" : "error");
+    window.setTimeout(() => setCopyState("idle"), 2000);
   };
 
   return (
@@ -899,36 +921,34 @@ function CodeGenScreen({ onGenerateRoom }) {
         {!code && !generating && <div style={{ fontFamily: FONT, fontSize: 24, color: COLORS.textMuted }}>_ _ - _ _ _ _</div>}
       </div>
 
-      {code !== null && (
-        <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: "12px 14px" }}>
-          <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>EXPIRY DURATION</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {[5, 10, 30, 60].map((min) => {
-              const selected = expiry === min;
-              return (
-                <button
-                  key={min}
-                  type="button"
-                  onClick={() => setExpiry(min)}
-                  style={{
-                    flex: 1,
-                    borderRadius: 10,
-                    border: `1px solid ${selected ? COLORS.accent : COLORS.border}`,
-                    background: selected ? COLORS.accentDim : COLORS.surface,
-                    color: selected ? COLORS.accent : COLORS.textMuted,
-                    fontFamily: FONT,
-                    fontSize: 11,
-                    padding: "8px 0",
-                    cursor: "pointer",
-                  }}
-                >
-                  {min}m
-                </button>
-              );
-            })}
-          </div>
+      <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: "12px 14px" }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>EXPIRY DURATION</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {[5, 10, 30, 60].map((min) => {
+            const selected = expiry === min;
+            return (
+              <button
+                key={min}
+                type="button"
+                onClick={() => setExpiry(min)}
+                style={{
+                  flex: 1,
+                  borderRadius: 10,
+                  border: `1px solid ${selected ? COLORS.accent : COLORS.border}`,
+                  background: selected ? COLORS.accentDim : COLORS.surface,
+                  color: selected ? COLORS.accent : COLORS.textMuted,
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  padding: "8px 0",
+                  cursor: "pointer",
+                }}
+              >
+                {min}m
+              </button>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       <button
         type="button"
@@ -951,26 +971,26 @@ function CodeGenScreen({ onGenerateRoom }) {
         {generating ? "⟳ GENERATING..." : "⚡ GENERATE NEW CODE"}
       </button>
 
-      {code !== null && (
-        <button
-          type="button"
-          onClick={copyCode}
-          style={{
-            width: "100%",
-            marginTop: 8,
-            padding: 12,
-            borderRadius: 12,
-            cursor: "pointer",
-            fontFamily: FONT,
-            fontSize: 12,
-            border: `1px solid ${copied ? COLORS.accent : COLORS.border}`,
-            background: copied ? COLORS.accentDim : COLORS.card,
-            color: copied ? COLORS.accent : COLORS.textMuted,
-          }}
-        >
-          {copied ? "✓ COPIED!" : "📋 COPY CODE"}
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={copyCode}
+        disabled={!code}
+        style={{
+          width: "100%",
+          marginTop: 8,
+          padding: 12,
+          borderRadius: 12,
+          cursor: code ? "pointer" : "not-allowed",
+          fontFamily: FONT,
+          fontSize: 12,
+          border: `1px solid ${copyState === "success" ? COLORS.accent : copyState === "error" ? COLORS.red : COLORS.border}`,
+          background: copyState === "success" ? COLORS.accentDim : COLORS.card,
+          color: copyState === "success" ? COLORS.accent : copyState === "error" ? COLORS.red : COLORS.textMuted,
+          opacity: code ? 1 : 0.65,
+        }}
+      >
+        {copyState === "success" ? "✓ COPIED!" : copyState === "error" ? "✕ COPY FAILED" : "📋 COPY CODE"}
+      </button>
 
       <div style={{ marginTop: 18, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: 12 }}>
         <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.accent, marginBottom: 8 }}>HOW IT WORKS</div>
