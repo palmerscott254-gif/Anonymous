@@ -36,12 +36,30 @@ const DEFAULT_SETTINGS = {
   stealthMode: false,
 };
 
+const DEFAULT_PROFILE = {
+  username: "Ghost",
+  emoji: "🦅",
+  peerCode: generatePeerCode(),
+};
+
+const DEFAULT_ACTIVITY = {
+  messages: 0,
+};
+
 function addAlpha(hex, alphaHex) {
   return `${hex}${alphaHex}`;
 }
 
-const EMOJI_REGEX = new RegExp("\\p{Emoji}", "u");
-const LEADING_EMOJI_REGEX = new RegExp("^\\p{Emoji}\\s*", "u");
+const EMOJI_REGEX = createSafeRegex("\\p{Emoji}", "u", /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
+const LEADING_EMOJI_REGEX = createSafeRegex("^\\p{Emoji}\\s*", "u", /^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\s*/u);
+
+function createSafeRegex(pattern, flags, fallback) {
+  try {
+    return new RegExp(pattern, flags);
+  } catch {
+    return fallback;
+  }
+}
 
 function getEmoji(name = "") {
   const match = name.match(EMOJI_REGEX);
@@ -305,6 +323,8 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
         {groups.map((g) => (
           <div
             key={g.id}
+            role="button"
+            tabIndex={0}
             style={{
               display: "flex",
               alignItems: "center",
@@ -316,6 +336,10 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
             }}
             onMouseEnter={() => setHovered(g.id)}
             onMouseLeave={() => setHovered(null)}
+            onClick={() => onOpen(g)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onOpen(g);
+            }}
           >
             <div
               style={{
@@ -473,7 +497,7 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   );
 }
 
-function ChatRoom({ chat, onBack, settings }) {
+function ChatRoom({ chat, onBack, settings, onMessageSent }) {
   const [msg, setMsg] = useState("");
   const [messages, setMessages] = useState(chat?.seedMessages || MESSAGES);
   const [typing, setTyping] = useState(false);
@@ -516,6 +540,7 @@ function ChatRoom({ chat, onBack, settings }) {
     if (!text) return;
     const mine = { id: Date.now(), from: "me", text, time: getNowHHMM(), read: false, expiresAt: shreddingEnabled ? Date.now() + 45000 : undefined };
     setMessages((prev) => [...prev, mine]);
+    if (onMessageSent) onMessageSent();
     setMsg("");
 
     const t1 = window.setTimeout(() => setTyping(true), 500);
@@ -1030,7 +1055,7 @@ function CodeGenScreen({ onGenerateRoom }) {
   );
 }
 
-function GroupsScreen({ groups, onCreateGroupRoom }) {
+function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
   const [showCreate, setShowCreate] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState("🛸");
@@ -1142,7 +1167,16 @@ function GroupsScreen({ groups, onCreateGroupRoom }) {
       )}
 
       {groups.map((group) => (
-        <div key={group.id} style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14, marginBottom: 8 }}>
+        <div
+          key={group.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpenGroupRoom(group)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") onOpenGroupRoom(group);
+          }}
+          style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14, marginBottom: 8, cursor: "pointer" }}
+        >
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
@@ -1178,18 +1212,29 @@ function GroupsScreen({ groups, onCreateGroupRoom }) {
   );
 }
 
-function ProfileScreen({ settings, onUpdateSettings }) {
-  const [username, setUsername] = useState("🦅 Falcon");
+function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSave, stats }) {
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState("");
-  const [selectedEmoji, setSelectedEmoji] = useState("🦅");
+  const [selectedEmoji, setSelectedEmoji] = useState(profile?.emoji || "🦅");
 
   const options = ["🦅", "🦊", "🐺", "🌙", "🔥", "⚡", "🎭", "🐉", "🦋", "🛸", "💀", "🌊"];
 
   const save = () => {
-    setUsername(`${selectedEmoji} ${tempName.trim() || "Ghost"}`);
+    onProfileSave({
+      username: tempName.trim() || "Ghost",
+      emoji: selectedEmoji,
+    });
     setEditing(false);
   };
+
+  useEffect(() => {
+    if (!editing) {
+      setSelectedEmoji(profile?.emoji || "🦅");
+      setTempName(profile?.username || "Ghost");
+    }
+  }, [editing, profile?.emoji, profile?.username]);
+
+  const displayName = `${profile?.emoji || "🦅"} ${profile?.username || "Ghost"}`;
 
   return (
     <div style={{ padding: 16 }}>
@@ -1239,7 +1284,7 @@ function ProfileScreen({ settings, onUpdateSettings }) {
             position: "relative",
           }}
         >
-          {getEmoji(username)}
+          {getEmoji(displayName)}
           <span
             style={{
               width: 24,
@@ -1260,16 +1305,16 @@ function ProfileScreen({ settings, onUpdateSettings }) {
           </span>
         </div>
 
-        <div style={{ marginTop: 10, fontFamily: SANS, fontSize: 18, fontWeight: 700, color: COLORS.text }}>{username}</div>
+        <div style={{ marginTop: 10, fontFamily: SANS, fontSize: 18, fontWeight: 700, color: COLORS.text }}>{displayName}</div>
         <div style={{ marginTop: 4, fontFamily: FONT, fontSize: 11, color: COLORS.textMuted }}>
-          <span style={{ color: COLORS.accent }}>FA-7741</span> • peer code
+          <span style={{ color: COLORS.accent }}>{profile?.peerCode || "--"}</span> • peer code
         </div>
 
         <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 14, paddingTop: 12, display: "flex", justifyContent: "space-around" }}>
           {[
-            ["1.2K", "Messages"],
-            ["47", "Tunnels"],
-            ["3", "Groups"],
+            [String(stats?.messages ?? 0), "Messages"],
+            [String(stats?.tunnels ?? 0), "Tunnels"],
+            [String(stats?.groups ?? 0), "Groups"],
           ].map(([value, label]) => (
             <div key={label}>
               <div style={{ fontFamily: FONT, fontSize: 16, fontWeight: 700, color: COLORS.accent }}>{value}</div>
@@ -1352,7 +1397,8 @@ function ProfileScreen({ settings, onUpdateSettings }) {
           type="button"
           onClick={() => {
             setEditing(true);
-            setTempName(stripLeadingEmoji(username));
+            setTempName(profile?.username || "Ghost");
+            setSelectedEmoji(profile?.emoji || "🦅");
           }}
           style={{
             marginTop: 12,
@@ -1427,6 +1473,28 @@ export default function GhostChat() {
       return DEFAULT_SETTINGS;
     }
   });
+  const [profile, setProfile] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("gc.profile");
+      if (!stored) return DEFAULT_PROFILE;
+      const parsed = JSON.parse(stored);
+      return {
+        ...DEFAULT_PROFILE,
+        ...parsed,
+        peerCode: displayPeerCode(parsed?.peerCode || DEFAULT_PROFILE.peerCode),
+      };
+    } catch {
+      return DEFAULT_PROFILE;
+    }
+  });
+  const [activity, setActivity] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem("gc.activity");
+      return stored ? { ...DEFAULT_ACTIVITY, ...JSON.parse(stored) } : DEFAULT_ACTIVITY;
+    } catch {
+      return DEFAULT_ACTIVITY;
+    }
+  });
   const [roomDirectory, setRoomDirectory] = useState(() => {
     const seeded = {};
     SEARCH_RESULTS.forEach((item) => {
@@ -1459,6 +1527,14 @@ export default function GhostChat() {
   useEffect(() => {
     window.localStorage.setItem("gc.settings", JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    window.localStorage.setItem("gc.profile", JSON.stringify(profile));
+  }, [profile]);
+
+  useEffect(() => {
+    window.localStorage.setItem("gc.activity", JSON.stringify(activity));
+  }, [activity]);
 
   const registerRoom = (chatLike, rawCode) => {
     const code = displayPeerCode(rawCode || chatLike?.code || generatePeerCode());
@@ -1500,9 +1576,15 @@ export default function GhostChat() {
     setTab("chats");
   };
 
+  const stats = {
+    messages: activity.messages,
+    tunnels: chats.length,
+    groups: groups.length,
+  };
+
   let content;
   if (activeChat) {
-    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} settings={settings} />;
+    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} settings={settings} onMessageSent={() => setActivity((prev) => ({ ...prev, messages: prev.messages + 1 }))} />;
   } else if (tab === "chats") {
     content = <ChatsScreen chats={chats} groups={groups} onOpen={openRoom} onRegisterRoom={registerRoom} />;
   } else if (tab === "search") {
@@ -1525,22 +1607,30 @@ export default function GhostChat() {
         }}
       />;
   } else if (tab === "groups") {
-    content = <GroupsScreen groups={groups} onCreateGroupRoom={registerRoom} />;
+    content = <GroupsScreen groups={groups} onCreateGroupRoom={registerRoom} onOpenGroupRoom={openRoom} />;
   } else {
-    content = <ProfileScreen settings={settings} onUpdateSettings={(key) => setSettings((prev) => ({ ...prev, [key]: !prev[key] }))} />;
+    content =
+      <ProfileScreen
+        settings={settings}
+        onUpdateSettings={(key) => setSettings((prev) => ({ ...prev, [key]: !prev[key] }))}
+        profile={profile}
+        onProfileSave={(partial) => setProfile((prev) => ({ ...prev, ...partial }))}
+        stats={stats}
+      />;
   }
 
   return (
     <div
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         width: "100%",
         background: "#050810",
         position: "relative",
-        overflow: "auto",
+        overflow: "hidden",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: "0 8px",
       }}
     >
       <style>
@@ -1555,8 +1645,9 @@ input::placeholder { color: #4B5563; }
 
       <div
         style={{
-          width: "min(420px, 100vw)",
-          height: "100vh",
+          width: "100%",
+          maxWidth: 420,
+          height: "100dvh",
           background: COLORS.bg,
           borderRadius: 0,
           overflow: "hidden",
@@ -1568,7 +1659,7 @@ input::placeholder { color: #4B5563; }
           zIndex: 10,
         }}
       >
-        <div style={{ flex: 1, overflowY: "auto" }}>{content}</div>
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>{content}</div>
 
         {!activeChat && <NavBar tab={tab} onTab={setTab} />}
       </div>
