@@ -754,7 +754,7 @@ function ChatsScreen({ onOpen, onRegisterRoom }) {
             <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>PEER CODE (optional)</div>
             <input
               value={peerCode}
-              onChange={(e) => setPeerCode(e.target.value.toUpperCase())}
+              onChange={(e) => setPeerCode(displayPeerCode(e.target.value))}
               placeholder="XX-0000"
               style={{
                 width: "100%",
@@ -1027,7 +1027,14 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
         }
       }
 
-      const deduped = filtered.filter((item, idx, arr) => arr.findIndex((x) => normalizePeerCode(x.code) === normalizePeerCode(item.code)) === idx);
+      const seen = new Set();
+      const deduped = filtered.filter((item) => {
+        const normalized = normalizePeerCode(item.code);
+        const dedupeKey = normalized || item.name.toLowerCase();
+        if (seen.has(dedupeKey)) return false;
+        seen.add(dedupeKey);
+        return true;
+      });
       setResults(deduped);
       setScanning(false);
     }, 1200);
@@ -1058,7 +1065,7 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
         <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 6 }}>PEER CODE</div>
         <input
           value={code}
-          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onChange={(e) => setCode(displayPeerCode(e.target.value))}
           placeholder="XX-0000"
           style={{
             width: "100%",
@@ -1332,7 +1339,7 @@ function CodeGenScreen({ onGenerateRoom }) {
   );
 }
 
-function GroupsScreen({ onCreateGroupRoom }) {
+function GroupsScreen({ groups, onCreateGroupRoom }) {
   const [showCreate, setShowCreate] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState("🛸");
@@ -1443,7 +1450,7 @@ function GroupsScreen({ onCreateGroupRoom }) {
         </div>
       )}
 
-      {GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.id} style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14, marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
@@ -1704,6 +1711,8 @@ function ProfileScreen() {
 export default function GhostChat() {
   const [tab, setTab] = useState("chats");
   const [activeChat, setActiveChat] = useState(null);
+  const [chats, setChats] = useState(CHATS);
+  const [groups, setGroups] = useState(GROUPS);
   const [roomDirectory, setRoomDirectory] = useState(() => {
     const seeded = {};
     SEARCH_RESULTS.forEach((item) => {
@@ -1744,6 +1753,25 @@ export default function GhostChat() {
       id: chatLike?.id || Date.now(),
     };
     setRoomDirectory((prev) => ({ ...prev, [key]: room }));
+
+    if (room.isGroup) {
+      setGroups((prev) => {
+        const exists = prev.some((item) => item.id === room.id || normalizePeerCode(item.code) === key);
+        if (exists) {
+          return prev.map((item) => (item.id === room.id || normalizePeerCode(item.code) === key ? { ...item, ...room } : item));
+        }
+        return [room, ...prev];
+      });
+    } else {
+      setChats((prev) => {
+        const exists = prev.some((item) => item.id === room.id || normalizePeerCode(item.code) === key);
+        if (exists) {
+          return prev.map((item) => (item.id === room.id || normalizePeerCode(item.code) === key ? { ...item, ...room } : item));
+        }
+        return [room, ...prev];
+      });
+    }
+
     return room;
   };
 
@@ -1758,7 +1786,7 @@ export default function GhostChat() {
   if (activeChat) {
     content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} />;
   } else if (tab === "chats") {
-    content = <ChatsScreen onOpen={openRoom} onRegisterRoom={registerRoom} />;
+    content = <ChatsScreen chats={chats} groups={groups} onOpen={openRoom} onRegisterRoom={registerRoom} />;
   } else if (tab === "search") {
     content = <SearchScreen roomDirectory={roomDirectory} onJoinRoom={openRoom} />;
   } else if (tab === "codegen") {
@@ -1779,7 +1807,7 @@ export default function GhostChat() {
         }}
       />;
   } else if (tab === "groups") {
-    content = <GroupsScreen onCreateGroupRoom={registerRoom} />;
+    content = <GroupsScreen groups={groups} onCreateGroupRoom={registerRoom} />;
   } else {
     content = <ProfileScreen />;
   }
@@ -1791,7 +1819,7 @@ export default function GhostChat() {
         width: "100%",
         background: "#050810",
         position: "relative",
-        overflow: "hidden",
+        overflow: "auto",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -1807,18 +1835,12 @@ input::placeholder { color: #4B5563; }
 }`}
       </style>
 
-      <MatrixBackground />
-      <IDETabBar />
-      <IDEGutter />
-      <IDEGutterRight />
-      <IDEStatusBar />
-
       <div
         style={{
-          width: 375,
-          height: 780,
+          width: "min(420px, 100vw)",
+          height: "100vh",
           background: COLORS.bg,
-          borderRadius: 40,
+          borderRadius: 0,
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -1828,27 +1850,6 @@ input::placeholder { color: #4B5563; }
           zIndex: 10,
         }}
       >
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 120,
-            height: 28,
-            background: COLORS.surface,
-            borderRadius: "0 0 20px 20px",
-            zIndex: 10,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 6,
-          }}
-        >
-          <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.border }} />
-          <span style={{ width: 40, height: 5, borderRadius: 999, background: COLORS.border }} />
-        </div>
-
         <StatusBar />
 
         <div style={{ flex: 1, overflowY: "auto" }}>{content}</div>

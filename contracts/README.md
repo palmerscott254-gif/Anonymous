@@ -138,8 +138,7 @@ Client -> Server (`room.join`):
 
 ```json
 {
-  "v": "1.0",
-  "event": "room.join",
+  "v": "1.0",   "event": "room.join",
   "reqId": "req_join_1",
   "ts": 1760000000200,
   "data": {
