@@ -46,6 +46,13 @@ const DEFAULT_ACTIVITY = {
   messages: 0,
 };
 
+const STORAGE_KEYS = {
+  chats: "gc.chats",
+  groups: "gc.groups",
+  rooms: "gc.rooms",
+  messages: "gc.messages",
+};
+
 function addAlpha(hex, alphaHex) {
   return `${hex}${alphaHex}`;
 }
@@ -459,15 +466,12 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   );
 }
 
-function ChatRoom({ chat, onBack, settings, onMessageSent }) {
+function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent }) {
   const [msg, setMsg] = useState("");
-  const [messages, setMessages] = useState(chat?.seedMessages || MESSAGES);
   const [typing, setTyping] = useState(false);
   const endRef = useRef(null);
-  const timeoutRef = useRef([]);
 
   useEffect(() => {
-    setMessages(chat?.seedMessages || MESSAGES);
     setMsg("");
     setTyping(false);
   }, [chat?.id]);
@@ -480,41 +484,21 @@ function ChatRoom({ chat, onBack, settings, onMessageSent }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
 
-  useEffect(
-    () => () => {
-      timeoutRef.current.forEach((t) => window.clearTimeout(t));
-    },
-    []
-  );
-
   useEffect(() => {
     if (!shreddingEnabled) return undefined;
     const shredTimer = window.setInterval(() => {
-      const now = Date.now();
-      setMessages((prev) => prev.filter((item) => !item.expiresAt || item.expiresAt > now));
+      onPruneMessages?.(chat?.id);
     }, 5000);
     return () => window.clearInterval(shredTimer);
-  }, [shreddingEnabled]);
+  }, [chat?.id, onPruneMessages, shreddingEnabled]);
 
   const send = () => {
     if (!tunnelEnabled) return;
     const text = msg.trim();
     if (!text) return;
-    const mine = { id: Date.now(), from: "me", text, time: getNowHHMM(), read: false, expiresAt: shreddingEnabled ? Date.now() + 45000 : undefined };
-    setMessages((prev) => [...prev, mine]);
+    onSendMessage?.(chat?.id, text, shreddingEnabled ? 45 : 0);
     if (onMessageSent) onMessageSent();
     setMsg("");
-
-    const t1 = window.setTimeout(() => setTyping(true), 500);
-    const t2 = window.setTimeout(() => {
-      setTyping(false);
-      setMessages((prev) => {
-        const marked = prev.map((item) => (item.from === "me" && !item.read ? { ...item, read: true } : item));
-        return [...marked, { id: Date.now() + 1, from: "them", text: "got it 👍", time: getNowHHMM(), read: false, expiresAt: shreddingEnabled ? Date.now() + 45000 : undefined }];
-      });
-    }, 2000);
-
-    timeoutRef.current.push(t1, t2);
   };
 
   return (
@@ -671,9 +655,9 @@ function SearchScreen({ roomDirectory, onJoinRoom }) {
       }
 
       if (roomDirectory[normalizedCode]) {
-        setStatus("Joining secure tunnel...");
+        const result = onJoinRoom(roomDirectory[normalizedCode]);
+        setStatus(result?.ok ? "Joining secure tunnel..." : result?.error || "Unable to join tunnel");
         setScanning(false);
-        onJoinRoom(roomDirectory[normalizedCode]);
         return;
       }
 
@@ -1433,8 +1417,22 @@ function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSave, sta
 export default function GhostChat() {
   const [tab, setTab] = useState("chats");
   const [activeChat, setActiveChat] = useState(null);
-  const [chats, setChats] = useState(CHATS);
-  const [groups, setGroups] = useState(GROUPS);
+  const [chats, setChats] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEYS.chats);
+      return stored ? JSON.parse(stored) : CHATS;
+    } catch {
+      return CHATS;
+    }
+  });
+  const [groups, setGroups] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEYS.groups);
+      return stored ? JSON.parse(stored) : GROUPS;
+    } catch {
+      return GROUPS;
+    }
+  });
   const [settings, setSettings] = useState(() => {
     try {
       const stored = window.localStorage.getItem("gc.settings");
@@ -1466,6 +1464,16 @@ export default function GhostChat() {
     }
   });
   const [roomDirectory, setRoomDirectory] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEYS.rooms);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === "object") return parsed;
+      }
+    } catch {
+      // fall through to seed
+    }
+
     const seeded = {};
     SEARCH_RESULTS.forEach((item) => {
       const code = displayPeerCode(item.code);
@@ -1478,9 +1486,18 @@ export default function GhostChat() {
         unread: 0,
         last: "Tunnel available",
         time: "now",
+        createdAt: Date.now(),
       };
     });
     return seeded;
+  });
+  const [messagesByRoom, setMessagesByRoom] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEYS.messages);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
   });
 
   useEffect(() => {
@@ -1506,15 +1523,36 @@ export default function GhostChat() {
     window.localStorage.setItem("gc.activity", JSON.stringify(activity));
   }, [activity]);
 
-  const registerRoom = (chatLike, rawCode) => {
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.chats, JSON.stringify(chats));
+  }, [chats]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.groups, JSON.stringify(groups));
+  }, [groups]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.rooms, JSON.stringify(roomDirectory));
+  }, [roomDirectory]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.messages, JSON.stringify(messagesByRoom));
+  }, [messagesByRoom]);
+
+  const registerRoom = (chatLike, rawCode, options = {}) => {
     const code = displayPeerCode(rawCode || chatLike?.code || generatePeerCode());
     const key = normalizePeerCode(code);
     if (!key) return chatLike;
+    const now = Date.now();
+    const ttlMinutes = Number(options?.expiryMinutes || chatLike?.ttlMinutes || 0);
+    const expiresAt = ttlMinutes > 0 ? now + ttlMinutes * 60 * 1000 : chatLike?.expiresAt;
     const room = {
       ...chatLike,
       code,
       online: typeof chatLike?.online === "boolean" ? chatLike.online : true,
-      id: chatLike?.id || Date.now(),
+      id: chatLike?.id || `room-${key}`,
+      createdAt: chatLike?.createdAt || now,
+      expiresAt,
     };
     setRoomDirectory((prev) => ({ ...prev, [key]: room }));
 
@@ -1539,11 +1577,46 @@ export default function GhostChat() {
     return room;
   };
 
+  const sendMessage = (roomId, text, autoShredSeconds = 0) => {
+    if (!roomId || !text?.trim()) return;
+    const message = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      from: "me",
+      text: text.trim(),
+      time: getNowHHMM(),
+      read: false,
+      expiresAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
+    };
+
+    setMessagesByRoom((prev) => ({
+      ...prev,
+      [roomId]: [...(prev[roomId] || []), message],
+    }));
+
+    setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
+    setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
+  };
+
+  const pruneRoomMessages = (roomId) => {
+    if (!roomId) return;
+    const now = Date.now();
+    setMessagesByRoom((prev) => {
+      const current = prev[roomId] || [];
+      const next = current.filter((item) => !item.expiresAt || item.expiresAt > now);
+      if (next.length === current.length) return prev;
+      return { ...prev, [roomId]: next };
+    });
+  };
+
   const openRoom = (chatLike) => {
-    if (!chatLike) return;
+    if (!chatLike) return { ok: false, error: "Tunnel not found" };
     const room = chatLike.code ? registerRoom(chatLike, chatLike.code) : chatLike;
+    if (room?.expiresAt && room.expiresAt <= Date.now()) {
+      return { ok: false, error: "Tunnel expired. Generate a new code." };
+    }
     setActiveChat(room);
     setTab("chats");
+    return { ok: true };
   };
 
   const stats = {
@@ -1554,7 +1627,17 @@ export default function GhostChat() {
 
   let content;
   if (activeChat) {
-    content = <ChatRoom chat={activeChat} onBack={() => setActiveChat(null)} settings={settings} onMessageSent={() => setActivity((prev) => ({ ...prev, messages: prev.messages + 1 }))} />;
+    content = (
+      <ChatRoom
+        chat={activeChat}
+        onBack={() => setActiveChat(null)}
+        settings={settings}
+        messages={messagesByRoom[activeChat.id] || []}
+        onSendMessage={sendMessage}
+        onPruneMessages={pruneRoomMessages}
+        onMessageSent={() => setActivity((prev) => ({ ...prev, messages: prev.messages + 1 }))}
+      />
+    );
   } else if (tab === "chats") {
     content = <ChatsScreen chats={chats} groups={groups} onOpen={openRoom} onRegisterRoom={registerRoom} />;
   } else if (tab === "search") {
@@ -1565,14 +1648,15 @@ export default function GhostChat() {
         onGenerateRoom={(codeValue, expiry) => {
           registerRoom(
             {
-              id: Date.now(),
+              id: `room-${normalizePeerCode(codeValue)}`,
               name: "🧠 Ghost Link",
               unread: 0,
               time: "now",
               last: `Secure key active ${expiry}m`,
               online: true,
             },
-            codeValue
+            codeValue,
+            { expiryMinutes: expiry }
           );
         }}
       />;
