@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useSocket } from "./src/hooks/useSocket";
 
 const COLORS = {
   bg: "#080B12",
@@ -1500,6 +1501,10 @@ export default function GhostChat() {
     }
   });
 
+  // Socket.IO integration
+  const { connected, peerId, emit: socketEmit, on: socketOn } = useSocket(profile);
+  const socketListenersRef = useRef({});
+
   useEffect(() => {
     if (!document.getElementById("gc-fonts")) {
       const link = document.createElement("link");
@@ -1510,6 +1515,105 @@ export default function GhostChat() {
       document.head.appendChild(link);
     }
   }, []);
+
+  // Socket.IO event listeners
+  useEffect(() => {
+    const unsubscribers = [];
+
+    if (connected) {
+      // Listen for room.code_generated
+      unsubscribers.push(
+        socketOn('room.code_generated', (payload) => {
+          console.log('[SOCKET.RECEIVED] room.code_generated', payload);
+          const { roomCode, expiresAt } = payload;
+          registerRoom(
+            {
+              id: `room-${normalizePeerCode(roomCode)}`,
+              name: "🧠 Ghost Link",
+              unread: 0,
+              time: "now",
+              last: "Tunnel ready",
+              online: true,
+              code: roomCode,
+            },
+            roomCode,
+            { expiryMinutes: Math.ceil((expiresAt - Date.now()) / (60 * 1000)) }
+          );
+        })
+      );
+
+      // Listen for room.joined
+      unsubscribers.push(
+        socketOn('room.joined', (payload) => {
+          console.log('[SOCKET.RECEIVED] room.joined', payload);
+          const { roomCode } = payload;
+          const key = normalizePeerCode(roomCode);
+          // Update room online status and member count
+          setRoomDirectory(prev => {
+            const room = prev[key];
+            if (room) {
+              return { ...prev, [key]: { ...room, online: true, members: payload.members?.length || 1 } };
+            }
+            return prev;
+          });
+        })
+      );
+
+      // Listen for msg.new (incoming messages)
+      unsubscribers.push(
+        socketOn('msg.new', (payload) => {
+          console.log('[SOCKET.RECEIVED] msg.new', payload);
+          const { fromPeerId, fromUsername, fromEmoji, bodyCiphertext, sentAt, autoShredAt } = payload;
+          if (fromPeerId === peerId) return; // Skip own messages
+          
+          const localRoomId = activeChat?.id;
+          if (!localRoomId) return;
+
+          const message = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            from: "them",
+            text: bodyCiphertext,
+            time: new Date(sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            read: true,
+            expiresAt: autoShredAt,
+          };
+
+          setMessagesByRoom(prev => ({
+            ...prev,
+            [localRoomId]: [...(prev[localRoomId] || []), message],
+          }));
+        })
+      );
+
+      // Listen for typing.update
+      unsubscribers.push(
+        socketOn('typing.update', (payload) => {
+          console.log('[SOCKET.RECEIVED] typing.update', payload);
+          // TODO: Update UI for typing indicator from other peers
+        })
+      );
+
+      // Listen for room.member_joined
+      unsubscribers.push(
+        socketOn('room.member_joined', (payload) => {
+          console.log('[SOCKET.RECEIVED] room.member_joined', payload);
+          // Update room members
+        })
+      );
+
+      // Listen for room.member_left
+      unsubscribers.push(
+        socketOn('room.member_left', (payload) => {
+          console.log('[SOCKET.RECEIVED] room.member_left', payload);
+          // Update room members
+        })
+      );
+    }
+
+    return () => {
+      unsubscribers.forEach(unsub => unsub?.());
+    };
+  }, [connected, socketOn, peerId, activeChat?.id]);
 
   useEffect(() => {
     window.localStorage.setItem("gc.settings", JSON.stringify(settings));
@@ -1579,8 +1683,14 @@ export default function GhostChat() {
 
   const sendMessage = (roomId, text, autoShredSeconds = 0) => {
     if (!roomId || !text?.trim()) return;
+    if (!connected) {
+      console.warn('[MSG] Cannot send: socket not connected');
+      return;
+    }
+
+    const clientMsgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const message = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: clientMsgId,
       from: "me",
       text: text.trim(),
       time: getNowHHMM(),
@@ -1588,6 +1698,7 @@ export default function GhostChat() {
       expiresAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
     };
 
+    // Add to local state immediately for UI responsiveness
     setMessagesByRoom((prev) => ({
       ...prev,
       [roomId]: [...(prev[roomId] || []), message],
@@ -1595,6 +1706,18 @@ export default function GhostChat() {
 
     setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
     setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
+
+    // Emit via socket
+    const activeRoom = activeChat;
+    if (activeRoom?.code) {
+      socketEmit('msg.send', {
+        roomId: activeRoom.id,
+        clientMsgId,
+        bodyCiphertext: text.trim(),
+        sentAt: Date.now(),
+        autoShredSeconds,
+      });
+    }
   };
 
   const pruneRoomMessages = (roomId) => {
@@ -1616,6 +1739,18 @@ export default function GhostChat() {
     }
     setActiveChat(room);
     setTab("chats");
+
+    // Emit room.join to socket if connected
+    if (connected && room?.code) {
+      socketEmit('room.join', {
+        roomCode: room.code,
+        identity: {
+          username: profile.username,
+          emoji: profile.emoji,
+        },
+      });
+    }
+
     return { ok: true };
   };
 
@@ -1646,6 +1781,7 @@ export default function GhostChat() {
     content =
       <CodeGenScreen
         onGenerateRoom={(codeValue, expiry) => {
+          // Register locally first
           registerRoom(
             {
               id: `room-${normalizePeerCode(codeValue)}`,
@@ -1658,6 +1794,14 @@ export default function GhostChat() {
             codeValue,
             { expiryMinutes: expiry }
           );
+          
+          // Emit to socket to generate server-side room
+          if (connected) {
+            socketEmit('room.generate_code', {
+              kind: 'direct',
+              ttlMinutes: expiry,
+            });
+          }
         }}
       />;
   } else if (tab === "groups") {
