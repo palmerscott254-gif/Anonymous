@@ -1,7 +1,12 @@
+import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const PORT = Number(process.env.PORT || 3001);
+const DATABASE_URL = process.env.DATABASE_URL || '';
 
 const app = express();
 const httpServer = createServer(app);
@@ -14,6 +19,48 @@ const io = new Server(httpServer, {
 
 app.use(cors());
 app.use(express.json());
+
+function getSafeDatabaseTarget(value = '') {
+  if (!value) return null;
+  try {
+    const parsed = new URL(value);
+    return `${parsed.protocol}//${parsed.hostname}:${parsed.port || '5432'}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+const safeDatabaseTarget = getSafeDatabaseTarget(DATABASE_URL);
+
+if (DATABASE_URL && !safeDatabaseTarget) {
+  console.error('[CONFIG] DATABASE_URL is set but invalid. Use a URL-encoded value.');
+  process.exit(1);
+}
+
+if (!DATABASE_URL) {
+  console.warn('[CONFIG] DATABASE_URL is not set. Backend will run without persistent storage.');
+}
+
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    env: NODE_ENV,
+    uptimeSec: Math.floor(process.uptime()),
+    databaseConfigured: Boolean(DATABASE_URL),
+    roomCount: rooms.size,
+    sessionCount: userSessions.size,
+    now: Date.now(),
+  });
+});
+
+app.get('/health/ready', (_req, res) => {
+  const ready = Boolean(DATABASE_URL);
+  res.status(ready ? 200 : 503).json({
+    ready,
+    databaseConfigured: Boolean(DATABASE_URL),
+    reason: ready ? 'ready' : 'DATABASE_URL missing',
+  });
+});
 
 // In-memory room storage
 const rooms = new Map(); // roomCode -> { id, code, createdAt, expiresAt, members: Set, messages: [] }
@@ -326,7 +373,10 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`🚀 GhostChat server ready on ${PORT}`);
+  console.log(`[CONFIG] NODE_ENV=${NODE_ENV}`);
+  if (safeDatabaseTarget) {
+    console.log(`[CONFIG] DATABASE_URL=${safeDatabaseTarget}`);
+  }
 });
