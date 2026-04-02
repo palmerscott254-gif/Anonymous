@@ -100,6 +100,17 @@ To test real-time messaging:
 Contributions welcome! Areas for improvement:
 - E2EE message encryption
 - Mobile optimization
+- Group invite codes
+  - Secure invite links and codes for private rooms
+  - Optional expiry, revocation, and usage limits
+- File sharing
+  - Image upload and preview
+  - File transfer protocol for documents and media
+  - Progress tracking and resumable transfers
+- Android optimization
+  - Startup, memory, and connection stability improvements
+  - Lower battery usage in background states
+  - Better mobile layout and reconnect handling
 - Group chat features
 - Message reactions
 - Voice/video calling

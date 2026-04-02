@@ -22,6 +22,12 @@ const userSessions = new Map(); // sessionId -> { userId, emoji, username, roomC
 const ROOM_TTL_MS = 60 * 60 * 1000; // 1 hour default
 const MESSAGE_HISTORY_LIMIT = 100;
 
+function normalizeRoomCode(value = '') {
+  const normalized = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  if (normalized.length <= 2) return normalized;
+  return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
+}
+
 function generateRoomId() {
   return `room-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -30,13 +36,23 @@ function generatePeerId() {
   return `peer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function createRoom(code, ttlMinutes = 10) {
+function generateInviteCode() {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const digits = '23456789';
+  const first = letters[Math.floor(Math.random() * letters.length)];
+  const second = letters[Math.floor(Math.random() * letters.length)];
+  const tail = Array.from({ length: 4 }, () => digits[Math.floor(Math.random() * digits.length)]).join('');
+  return `${first}${second}-${tail}`;
+}
+
+function createRoom(code, ttlMinutes = 10, kind = 'direct') {
   const now = Date.now();
   const expiresAt = now + (ttlMinutes * 60 * 1000);
   
   const room = {
     id: generateRoomId(),
     code,
+    kind,
     createdAt: now,
     expiresAt,
     members: new Map(), // peerId -> { emoji, username, online, socket }
@@ -98,6 +114,7 @@ io.on('connection', (socket) => {
         e2ee: false,
         autoShred: true,
         groups: true,
+        fileSharing: true,
       },
     });
     
@@ -111,15 +128,15 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const { ttlMinutes = 10 } = payload;
-    const code = `${String(Math.random()).slice(2, 4).toUpperCase()}-${String(Math.random()).slice(2, 6)}`;
-    const room = createRoom(code, ttlMinutes);
+    const { ttlMinutes = 10, roomCode, kind = 'direct' } = payload;
+    const code = normalizeRoomCode(roomCode) || generateInviteCode();
+    const room = createRoom(code, ttlMinutes, kind);
 
     socket.emit('room.code_generated', {
       roomId: room.id,
       roomCode: code,
       expiresAt: room.expiresAt,
-      kind: 'direct',
+      kind,
     });
     
     console.log(`[ROOM.GENERATED] ${code} expires at ${new Date(room.expiresAt).toISOString()}`);
@@ -169,7 +186,7 @@ io.on('connection', (socket) => {
     socket.emit('room.joined', {
       roomId: room.id,
       roomCode,
-      kind: 'direct',
+      kind: room.kind || 'direct',
       joinedAt: Date.now(),
       members: Array.from(room.members.values()).map(m => ({
         peerId: m.peerId,
@@ -207,7 +224,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const { clientMsgId, bodyCiphertext, sentAt, autoShredSeconds = 0 } = payload;
+    const { clientMsgId, bodyCiphertext, sentAt, autoShredSeconds = 0, attachment = null } = payload;
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     
     const message = {
@@ -220,6 +237,7 @@ io.on('connection', (socket) => {
       sentAt,
       serverReceivedAt: Date.now(),
       autoShredAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
+      attachment,
     };
 
     room.messages.push(message);

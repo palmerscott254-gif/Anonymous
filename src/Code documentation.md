@@ -150,20 +150,24 @@ VITE_SOCKET_URL=http://192.168.x.x:3001
 
 3. **Group Chats**
    - Multi-member rooms
-   - Group invite codes
    - Admin controls
 
-4. **File Sharing**
-   - Image upload
-   - File transfer protocol
-   - Encrypted storage
+4. **Group Invite Codes**
+   - Generate secure, shareable invite codes or links for private group rooms
+   - Support role-based access for admins and members
+   - Add optional expiry, revocation, and usage limits
 
-5. **Android Optimization**
-   - Background message sync
-   - Push notifications
-   - Battery optimization
+5. **File Sharing**
+   - Support image upload and inline preview
+   - Define a reliable file transfer protocol for documents and media
+   - Include progress indicators, retries, and resumable transfers
 
-6. **Voice/Video**
+6. **Android Optimization**
+   - Improve startup performance, memory usage, and socket stability
+   - Reduce battery drain during idle and background activity
+   - Polish mobile UI, touch interactions, and reconnect behavior
+
+7. **Voice/Video**
    - WebRTC integration
    - STUN/TURN servers
    - Call signaling via Socket.IO

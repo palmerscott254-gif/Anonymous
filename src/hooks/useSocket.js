@@ -79,6 +79,18 @@ export function useSocket(identity) {
     };
   }, [identity]);
 
+  useEffect(() => {
+    if (socketRef.current?.connected && identity) {
+      socketRef.current.emit('session.hello', {
+        deviceId: socketRef.current.id,
+        identity: {
+          username: identity.username || 'Ghost',
+          emoji: identity.emoji || '👤',
+        },
+      });
+    }
+  }, [identity?.username, identity?.emoji]);
+
   const emit = (eventName, payload) => {
     if (socketRef.current?.connected) {
       socketRef.current.emit(eventName, payload);

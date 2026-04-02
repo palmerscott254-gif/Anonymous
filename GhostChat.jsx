@@ -35,6 +35,7 @@ const DEFAULT_SETTINGS = {
   websocketTunnels: true,
   messageShredding: true,
   stealthMode: false,
+  androidOptimization: true,
 };
 
 const DEFAULT_PROFILE = {
@@ -101,6 +102,57 @@ function displayPeerCode(value = "") {
   if (!normalized) return "";
   if (normalized.length <= 2) return normalized;
   return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
+}
+
+function formatFileSize(bytes = 0) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** index;
+  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+function isImageMimeType(mime = "") {
+  return /^image\//i.test(mime);
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall back below
+  }
+
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    textArea.style.pointerEvents = "none";
+    textArea.style.left = "-9999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    return copied;
+  } catch {
+    return false;
+  }
 }
 
 function ShieldIcon({ size = 14, color = COLORS.accent }) {
@@ -470,20 +522,26 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
 function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent }) {
   const [msg, setMsg] = useState("");
   const [typing, setTyping] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState(null);
+  const [attachmentError, setAttachmentError] = useState("");
   const endRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     setMsg("");
     setTyping(false);
+    setPendingAttachment(null);
+    setAttachmentError("");
   }, [chat?.id]);
 
   const shreddingEnabled = settings?.messageShredding ?? true;
   const tunnelEnabled = settings?.websocketTunnels ?? true;
   const encryptionEnabled = settings?.endToEndEncryption ?? true;
+  const androidOptimized = settings?.androidOptimization ?? true;
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+    endRef.current?.scrollIntoView({ behavior: androidOptimized ? "auto" : "smooth" });
+  }, [messages, typing, androidOptimized]);
 
   useEffect(() => {
     if (!shreddingEnabled) return undefined;
@@ -493,14 +551,54 @@ function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMess
     return () => window.clearInterval(shredTimer);
   }, [chat?.id, onPruneMessages, shreddingEnabled]);
 
+  const pickAttachment = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    const maxBytes = 6 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      setAttachmentError(`File is too large. Max size is ${formatFileSize(maxBytes)}.`);
+      setPendingAttachment(null);
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setPendingAttachment({
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        size: file.size,
+        dataUrl,
+      });
+      setAttachmentError("");
+    } catch {
+      setAttachmentError("Unable to attach this file right now.");
+    }
+  };
+
   const send = () => {
     if (!tunnelEnabled) return;
     const text = msg.trim();
-    if (!text) return;
-    onSendMessage?.(chat?.id, text, shreddingEnabled ? 45 : 0);
+    if (!text && !pendingAttachment) return;
+
+    onSendMessage?.(
+      chat?.id,
+      text,
+      shreddingEnabled ? 45 : 0,
+      pendingAttachment
+    );
     if (onMessageSent) onMessageSent();
     setMsg("");
+    setPendingAttachment(null);
+    setAttachmentError("");
   };
+
+  const attachmentLabel = pendingAttachment
+    ? isImageMimeType(pendingAttachment.mimeType)
+      ? "Image ready to send"
+      : "File ready to send"
+    : "";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -539,7 +637,40 @@ function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMess
         {messages.map((m) => (
           <div key={m.id} style={{ display: "flex", justifyContent: m.from === "me" ? "flex-end" : "flex-start", padding: "0 10px" }}>
             <div style={{ maxWidth: "72%", background: "transparent", border: "none", padding: "4px 8px" }}>
-              <div style={{ fontFamily: SANS, fontSize: 13, color: m.from === "me" ? "#39FF14" : "#00BFFF", lineHeight: 1.4 }}>{m.text}</div>
+              {m.text ? <div style={{ fontFamily: SANS, fontSize: 13, color: m.from === "me" ? "#39FF14" : "#00BFFF", lineHeight: 1.4 }}>{m.text}</div> : null}
+              {m.attachment ? (
+                <div
+                  style={{
+                    marginTop: m.text ? 8 : 0,
+                    borderRadius: 14,
+                    overflow: "hidden",
+                    border: `1px solid ${m.from === "me" ? addAlpha(COLORS.accent, "35") : COLORS.border}`,
+                    background: m.from === "me" ? COLORS.bubbleSelf : COLORS.bubble,
+                  }}
+                >
+                  {isImageMimeType(m.attachment.mimeType) ? (
+                    <img
+                      src={m.attachment.dataUrl}
+                      alt={m.attachment.name}
+                      style={{ display: "block", width: "100%", maxHeight: 280, objectFit: "cover" }}
+                    />
+                  ) : null}
+                  <div style={{ padding: 10, display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontSize: 20 }}>{isImageMimeType(m.attachment.mimeType) ? "🖼️" : "📎"}</div>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.text, wordBreak: "break-word" }}>{m.attachment.name}</div>
+                      <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted }}>{formatFileSize(m.attachment.size)}</div>
+                    </div>
+                    <a
+                      href={m.attachment.dataUrl}
+                      download={m.attachment.name}
+                      style={{ marginLeft: "auto", fontFamily: FONT, fontSize: 10, color: COLORS.accent, textDecoration: "none" }}
+                    >
+                      SAVE
+                    </a>
+                  </div>
+                </div>
+              ) : null}
               <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, textAlign: "right", marginTop: 2 }}>
                 {m.time}
                 {m.from === "me" ? ` ${m.read ? "✓✓" : "✓"}` : ""}
@@ -583,6 +714,7 @@ function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMess
       >
         <button
           type="button"
+          onClick={() => fileInputRef.current?.click()}
           style={{
             width: 36,
             height: 36,
@@ -595,6 +727,7 @@ function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMess
         >
           📎
         </button>
+        <input ref={fileInputRef} type="file" accept="image/*,application/pdf,.txt,.md,.csv,.zip,.mp3,.mp4,.mov,.webm,.doc,.docx" onChange={pickAttachment} style={{ display: "none" }} />
         <input
           value={msg}
           onChange={(e) => setMsg(e.target.value)}
@@ -618,20 +751,50 @@ function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMess
         <button
           type="button"
           onClick={send}
-          disabled={!tunnelEnabled}
+          disabled={!tunnelEnabled || (!msg.trim() && !pendingAttachment)}
           style={{
             width: 36,
             height: 36,
             borderRadius: "50%",
             border: "none",
             cursor: "pointer",
-            background: msg.trim() ? COLORS.accent : COLORS.card,
-            color: msg.trim() ? COLORS.bg : COLORS.textMuted,
+            background: msg.trim() || pendingAttachment ? COLORS.accent : COLORS.card,
+            color: msg.trim() || pendingAttachment ? COLORS.bg : COLORS.textMuted,
           }}
         >
           ➤
         </button>
       </div>
+      {(pendingAttachment || attachmentError) && (
+        <div style={{ padding: "0 12px 12px", background: COLORS.surface }}>
+          {attachmentError ? (
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.red }}>{attachmentError}</div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.card, padding: "8px 10px" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.text }}>{attachmentLabel}</div>
+                <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, wordBreak: "break-word" }}>{pendingAttachment.name} • {formatFileSize(pendingAttachment.size)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPendingAttachment(null)}
+                style={{
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 999,
+                  background: COLORS.surface,
+                  color: COLORS.textMuted,
+                  fontFamily: FONT,
+                  fontSize: 10,
+                  padding: "5px 8px",
+                  cursor: "pointer",
+                }}
+              >
+                REMOVE
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1015,8 +1178,15 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
   const [groupName, setGroupName] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState("🛸");
   const [latestGroupCode, setLatestGroupCode] = useState("");
+  const [copyState, setCopyState] = useState({});
 
   const options = ["🛸", "🌊", "🔥", "⚡", "🌙", "🦋", "🐺", "🦊", "🐉", "🎭", "💀", "🌌"];
+
+  const copyInviteCode = async (code, key) => {
+    const copied = await copyTextToClipboard(code);
+    setCopyState((prev) => ({ ...prev, [key]: copied ? "success" : "error" }));
+    window.setTimeout(() => setCopyState((prev) => ({ ...prev, [key]: "idle" })), 1600);
+  };
 
   return (
     <div style={{ padding: 16 }}>
@@ -1083,7 +1253,7 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
             onClick={() => {
               const name = `${selectedEmoji} ${groupName.trim() || "Ghost Group"}`;
               const codeValue = generatePeerCode();
-              onCreateGroupRoom({
+              const createdRoom = onCreateGroupRoom({
                 id: Date.now(),
                 name,
                 members: 1,
@@ -1094,7 +1264,7 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
                 time: "now",
                 code: codeValue,
               });
-              setLatestGroupCode(codeValue);
+              setLatestGroupCode(createdRoom?.code || codeValue);
               setShowCreate(false);
               setGroupName("");
             }}
@@ -1116,8 +1286,24 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
       )}
 
       {latestGroupCode && (
-        <div style={{ marginBottom: 8, fontFamily: FONT, fontSize: 10, color: COLORS.purple }}>
-          New group tunnel code: {latestGroupCode}
+        <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontFamily: FONT, fontSize: 10, color: COLORS.purple, background: COLORS.card, border: `1px solid ${addAlpha(COLORS.purple, "30")}`, borderRadius: 12, padding: "8px 10px" }}>
+          <span>Invite code: {latestGroupCode}</span>
+          <button
+            type="button"
+            onClick={() => copyInviteCode(latestGroupCode, latestGroupCode)}
+            style={{
+              border: `1px solid ${addAlpha(COLORS.purple, "40")}`,
+              borderRadius: 999,
+              background: copyState[latestGroupCode] === "success" ? COLORS.purpleDim : COLORS.surface,
+              color: copyState[latestGroupCode] === "success" ? COLORS.purple : COLORS.textMuted,
+              fontFamily: FONT,
+              fontSize: 9,
+              padding: "5px 8px",
+              cursor: "pointer",
+            }}
+          >
+            {copyState[latestGroupCode] === "success" ? "COPIED" : "COPY"}
+          </button>
         </div>
       )}
 
@@ -1153,6 +1339,28 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{group.name}</div>
               <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>{group.members} members • encrypted</div>
+              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.purple }}>{group.code}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    copyInviteCode(group.code, group.id);
+                  }}
+                  style={{
+                    border: `1px solid ${addAlpha(COLORS.purple, "35")}`,
+                    borderRadius: 999,
+                    background: copyState[group.id] === "success" ? COLORS.purpleDim : COLORS.surface,
+                    color: copyState[group.id] === "success" ? COLORS.purple : COLORS.textMuted,
+                    fontFamily: FONT,
+                    fontSize: 9,
+                    padding: "4px 7px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {copyState[group.id] === "success" ? "INVITE COPIED" : "COPY INVITE"}
+                </button>
+              </div>
             </div>
 
             {group.unread > 0 && (
@@ -1563,7 +1771,7 @@ export default function GhostChat() {
       unsubscribers.push(
         socketOn('msg.new', (payload) => {
           console.log('[SOCKET.RECEIVED] msg.new', payload);
-          const { fromPeerId, fromUsername, fromEmoji, bodyCiphertext, sentAt, autoShredAt } = payload;
+          const { fromPeerId, bodyCiphertext, sentAt, autoShredAt, attachment } = payload;
           if (fromPeerId === peerId) return; // Skip own messages
           
           const localRoomId = activeChat?.id;
@@ -1576,6 +1784,7 @@ export default function GhostChat() {
             time: new Date(sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             read: true,
             expiresAt: autoShredAt,
+            attachment,
           };
 
           setMessagesByRoom(prev => ({
@@ -1681,21 +1890,23 @@ export default function GhostChat() {
     return room;
   };
 
-  const sendMessage = (roomId, text, autoShredSeconds = 0) => {
-    if (!roomId || !text?.trim()) return;
+  const sendMessage = (roomId, text, autoShredSeconds = 0, attachment = null) => {
+    if (!roomId || (!text?.trim() && !attachment)) return;
     if (!connected) {
       console.warn('[MSG] Cannot send: socket not connected');
       return;
     }
 
     const clientMsgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const summaryText = text?.trim() || (attachment ? (isImageMimeType(attachment.mimeType) ? attachment.name || "Image" : attachment.name || "File") : "");
     const message = {
       id: clientMsgId,
       from: "me",
-      text: text.trim(),
+      text: text?.trim() || "",
       time: getNowHHMM(),
       read: false,
       expiresAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
+      attachment,
     };
 
     // Add to local state immediately for UI responsiveness
@@ -1704,8 +1915,9 @@ export default function GhostChat() {
       [roomId]: [...(prev[roomId] || []), message],
     }));
 
-    setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
-    setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: message.text, time: "now" } : item)));
+    const lastText = summaryText || "Attachment sent";
+    setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
+    setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
 
     // Emit via socket
     const activeRoom = activeChat;
@@ -1713,9 +1925,10 @@ export default function GhostChat() {
       socketEmit('msg.send', {
         roomId: activeRoom.id,
         clientMsgId,
-        bodyCiphertext: text.trim(),
+        bodyCiphertext: text?.trim() || summaryText,
         sentAt: Date.now(),
         autoShredSeconds,
+        attachment,
       });
     }
   };
@@ -1752,6 +1965,28 @@ export default function GhostChat() {
     }
 
     return { ok: true };
+  };
+
+  const createGroupRoom = (groupLike) => {
+    const createdRoom = registerRoom(
+      {
+        ...groupLike,
+        isGroup: true,
+        last: groupLike?.last || "Group tunnel created",
+      },
+      groupLike?.code,
+      { expiryMinutes: groupLike?.expiryMinutes || 60 }
+    );
+
+    if (connected && createdRoom?.code) {
+      socketEmit('room.generate_code', {
+        kind: 'group',
+        ttlMinutes: groupLike?.expiryMinutes || 60,
+        roomCode: createdRoom.code,
+      });
+    }
+
+    return createdRoom;
   };
 
   const stats = {
@@ -1800,12 +2035,13 @@ export default function GhostChat() {
             socketEmit('room.generate_code', {
               kind: 'direct',
               ttlMinutes: expiry,
+              roomCode: codeValue,
             });
           }
         }}
       />;
   } else if (tab === "groups") {
-    content = <GroupsScreen groups={groups} onCreateGroupRoom={registerRoom} onOpenGroupRoom={openRoom} />;
+    content = <GroupsScreen groups={groups} onCreateGroupRoom={createGroupRoom} onOpenGroupRoom={openRoom} />;
   } else {
     content =
       <ProfileScreen
