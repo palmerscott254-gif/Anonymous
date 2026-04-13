@@ -3,22 +3,167 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { Pool } from 'pg';
+import { webcrypto } from 'node:crypto';
 
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PORT = Number(process.env.PORT || 3001);
 const DATABASE_URL = process.env.DATABASE_URL || '';
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '';
+const MESSAGE_RATE_LIMIT_PER_MIN = NODE_ENV === 'production' ? 40 : 300;
+const HTTP_RATE_LIMIT_PER_MIN = NODE_ENV === 'production' ? 180 : 1200;
+const MAX_CIPHERTEXT_CHARS = 24000;
+
+const encoder = new TextEncoder();
+
+function decodeBase64(base64Value = '') {
+  return Buffer.from(base64Value, 'base64');
+}
+
+function isLikelyBase64(value = '') {
+  return typeof value === 'string' && /^[A-Za-z0-9+/]+=*$/.test(value) && value.length % 4 === 0;
+}
+
+function getAllowedOrigins(rawValue = '') {
+  return rawValue
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const allowedOrigins = getAllowedOrigins(CORS_ORIGIN);
+
+function isCorsOriginAllowed(origin) {
+  if (!origin) return true;
+  if (NODE_ENV !== 'production' && allowedOrigins.length === 0) return true;
+  return allowedOrigins.includes(origin);
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (isCorsOriginAllowed(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('CORS origin denied'));
+  },
+  methods: ['GET', 'POST'],
+};
+
+if (NODE_ENV === 'production' && allowedOrigins.length === 0) {
+  console.error('[CONFIG] CORS_ORIGIN is required in production. Set allowed origins as comma-separated list.');
+  process.exit(1);
+}
+
+function applySecurityHeaders(_req, res, next) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
+  next();
+}
+
+const httpRateBuckets = new Map();
+
+function isRateLimited(map, key, limit, windowMs) {
+  const now = Date.now();
+  const bucket = map.get(key);
+  if (!bucket || now > bucket.resetAt) {
+    map.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+
+  bucket.count += 1;
+  if (bucket.count > limit) {
+    return true;
+  }
+
+  return false;
+}
+
+function enforceHttpRateLimit(req, res, next) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown-ip';
+  const limited = isRateLimited(httpRateBuckets, `http:${ip}`, HTTP_RATE_LIMIT_PER_MIN, 60 * 1000);
+  if (limited) {
+    res.status(429).json({
+      code: 'RATE_LIMITED',
+      message: 'Too many requests. Try again shortly.',
+    });
+    return;
+  }
+  next();
+}
+
+const socketRateBuckets = new Map();
+
+function enforceSocketRateLimit(socketId, eventName, limitPerMinute) {
+  return !isRateLimited(socketRateBuckets, `socket:${socketId}:${eventName}`, limitPerMinute, 60 * 1000);
+}
+
+function buildSignedMessageBlob(payload) {
+  const data = {
+    clientMsgId: String(payload.clientMsgId || ''),
+    sentAt: Number(payload.sentAt || 0),
+    bodyCiphertext: String(payload.bodyCiphertext || ''),
+    bodyIv: String(payload.bodyIv || ''),
+    bodyFormat: String(payload.bodyFormat || ''),
+    wrappedKeys: payload.wrappedKeys && typeof payload.wrappedKeys === 'object' ? payload.wrappedKeys : {},
+  };
+
+  return JSON.stringify(data);
+}
+
+async function verifyMessageSignature(payload) {
+  try {
+    const signingPublicKey = payload?.signingPublicKey;
+    const signature = payload?.signature;
+
+    if (!isLikelyBase64(signingPublicKey) || !isLikelyBase64(signature)) {
+      return false;
+    }
+
+    const verifyKey = await webcrypto.subtle.importKey(
+      'spki',
+      decodeBase64(signingPublicKey),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify']
+    );
+
+    return webcrypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      verifyKey,
+      decodeBase64(signature),
+      encoder.encode(buildSignedMessageBlob(payload))
+    );
+  } catch {
+    return false;
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: '*',
+    origin(origin, callback) {
+      if (isCorsOriginAllowed(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('CORS origin denied'));
+    },
     methods: ['GET', 'POST']
   }
 });
 
-app.use(cors());
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(applySecurityHeaders);
+app.use(cors(corsOptions));
+app.use(enforceHttpRateLimit);
+app.use(express.json({ limit: '100kb' }));
 
 function getSafeDatabaseTarget(value = '') {
   if (!value) return null;
@@ -31,6 +176,20 @@ function getSafeDatabaseTarget(value = '') {
 }
 
 const safeDatabaseTarget = getSafeDatabaseTarget(DATABASE_URL);
+const dbPool = DATABASE_URL
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      max: 3,
+      idleTimeoutMillis: 5000,
+      connectionTimeoutMillis: 3000,
+    })
+  : null;
+
+if (dbPool) {
+  dbPool.on('error', (error) => {
+    console.error('[DB] Pool error:', error.message);
+  });
+}
 
 if (DATABASE_URL && !safeDatabaseTarget) {
   console.error('[CONFIG] DATABASE_URL is set but invalid. Use a URL-encoded value.');
@@ -60,6 +219,37 @@ app.get('/health/ready', (_req, res) => {
     databaseConfigured: Boolean(DATABASE_URL),
     reason: ready ? 'ready' : 'DATABASE_URL missing',
   });
+});
+
+app.get('/health/db', async (_req, res) => {
+  if (!dbPool) {
+    res.status(503).json({
+      status: 'error',
+      database: 'unconfigured',
+      reason: 'DATABASE_URL missing',
+    });
+    return;
+  }
+
+  const startedAt = Date.now();
+
+  try {
+    const result = await dbPool.query('SELECT 1 AS ok');
+    const probeOk = result.rows?.[0]?.ok === 1;
+
+    res.status(probeOk ? 200 : 503).json({
+      status: probeOk ? 'ok' : 'error',
+      database: probeOk ? 'reachable' : 'unexpected_result',
+      latencyMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'error',
+      database: 'unreachable',
+      latencyMs: Date.now() - startedAt,
+      reason: error?.message || 'Database probe failed',
+    });
+  }
 });
 
 // In-memory room storage
@@ -158,7 +348,8 @@ io.on('connection', (socket) => {
       peerId: session.peerId,
       serverTime: Date.now(),
       features: {
-        e2ee: false,
+        e2ee: true,
+        messageSigning: true,
         autoShred: true,
         groups: true,
         fileSharing: true,
@@ -172,6 +363,11 @@ io.on('connection', (socket) => {
     const session = userSessions.get(sessionId);
     if (!session) {
       socket.emit('error', { code: 'UNAUTHORIZED', message: 'Session not initialized' });
+      return;
+    }
+
+    if (!enforceSocketRateLimit(sessionId, 'room.generate_code', NODE_ENV === 'production' ? 20 : 120)) {
+      socket.emit('error', { code: 'RATE_LIMITED', message: 'Too many room generation requests' });
       return;
     }
 
@@ -196,6 +392,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (!enforceSocketRateLimit(sessionId, 'room.join', NODE_ENV === 'production' ? 30 : 180)) {
+      socket.emit('error', { code: 'RATE_LIMITED', message: 'Too many room join requests' });
+      return;
+    }
+
     const { roomCode, identity } = payload;
     const room = getRoomByCode(roomCode);
 
@@ -210,10 +411,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const encryptionPublicKey = identity?.keys?.encryptionPublicKey || null;
+    const signingPublicKey = identity?.keys?.signingPublicKey || null;
+
+    if (!encryptionPublicKey || !signingPublicKey) {
+      socket.emit('error', { code: 'E2EE_KEYS_REQUIRED', message: 'Missing encryption/signing public keys' });
+      return;
+    }
+
     // Update session
     session.roomCode = roomCode;
     session.emoji = identity?.emoji || session.emoji;
     session.username = identity?.username || session.username;
+    session.e2ee = {
+      encryptionPublicKey,
+      signingPublicKey,
+    };
     userSessions.set(sessionId, session);
 
     // Add member to room
@@ -224,6 +437,10 @@ io.on('connection', (socket) => {
       online: true,
       socket,
       joinedAt: Date.now(),
+      e2ee: {
+        encryptionPublicKey,
+        signingPublicKey,
+      },
     });
 
     // Join socket.io room
@@ -240,10 +457,14 @@ io.on('connection', (socket) => {
         username: m.username,
         emoji: m.emoji,
         online: m.online,
+        e2ee: {
+          encryptionPublicKey: m.e2ee?.encryptionPublicKey || null,
+          signingPublicKey: m.e2ee?.signingPublicKey || null,
+        },
       })),
       security: {
-        e2eeRequired: false,
-        algorithm: 'PLAIN',
+        e2eeRequired: true,
+        algorithm: 'AES-GCM-256 + ECDH-P256 + ECDSA-P256',
       },
     });
 
@@ -253,15 +474,24 @@ io.on('connection', (socket) => {
       peerId: session.peerId,
       username: session.username,
       emoji: session.emoji,
+      e2ee: {
+        encryptionPublicKey,
+        signingPublicKey,
+      },
     });
 
     console.log(`[ROOM.JOINED] ${session.peerId} → ${roomCode} (${room.members.size} total)`);
   });
 
-  socket.on('msg.send', (payload) => {
+  socket.on('msg.send', async (payload) => {
     const session = userSessions.get(sessionId);
     if (!session || !session.roomCode) {
       socket.emit('error', { code: 'UNAUTHORIZED', message: 'Not in a room' });
+      return;
+    }
+
+    if (!enforceSocketRateLimit(sessionId, 'msg.send', MESSAGE_RATE_LIMIT_PER_MIN)) {
+      socket.emit('error', { code: 'RATE_LIMITED', message: 'Message rate limit exceeded' });
       return;
     }
 
@@ -271,7 +501,72 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const { clientMsgId, bodyCiphertext, sentAt, autoShredSeconds = 0, attachment = null } = payload;
+    const {
+      clientMsgId,
+      bodyCiphertext,
+      bodyIv,
+      bodyFormat,
+      wrappedKeys,
+      sentAt,
+      autoShredSeconds = 0,
+      attachment = null,
+      signature,
+      signingPublicKey,
+    } = payload;
+
+    if (bodyFormat !== 'E2EE_V1') {
+      socket.emit('error', { code: 'E2EE_REQUIRED', message: 'Plaintext messages are not accepted' });
+      return;
+    }
+
+    if (typeof bodyCiphertext !== 'string' || bodyCiphertext.length === 0 || bodyCiphertext.length > MAX_CIPHERTEXT_CHARS) {
+      socket.emit('error', { code: 'BAD_REQUEST', message: 'Invalid ciphertext payload' });
+      return;
+    }
+
+    if (typeof bodyIv !== 'string' || !isLikelyBase64(bodyIv)) {
+      socket.emit('error', { code: 'BAD_REQUEST', message: 'Invalid bodyIv' });
+      return;
+    }
+
+    if (!wrappedKeys || typeof wrappedKeys !== 'object' || Array.isArray(wrappedKeys)) {
+      socket.emit('error', { code: 'BAD_REQUEST', message: 'Missing wrappedKeys map' });
+      return;
+    }
+
+    const activeMemberPeerIds = Array.from(room.members.keys());
+    const hasAllWrappedKeys = activeMemberPeerIds.every((memberPeerId) => {
+      const wrapped = wrappedKeys?.[memberPeerId];
+      return Boolean(wrapped?.ciphertext && wrapped?.iv && wrapped?.salt);
+    });
+    if (!hasAllWrappedKeys) {
+      socket.emit('error', { code: 'BAD_REQUEST', message: 'Missing wrapped key for one or more room members' });
+      return;
+    }
+
+    const senderMember = room.members.get(session.peerId);
+    const registeredSigningKey = senderMember?.e2ee?.signingPublicKey || session?.e2ee?.signingPublicKey;
+    if (!registeredSigningKey || registeredSigningKey !== signingPublicKey) {
+      socket.emit('error', { code: 'SIGNING_KEY_MISMATCH', message: 'Signing key mismatch for sender' });
+      return;
+    }
+
+    const signatureValid = await verifyMessageSignature({
+      clientMsgId,
+      sentAt,
+      bodyCiphertext,
+      bodyIv,
+      bodyFormat,
+      wrappedKeys,
+      signature,
+      signingPublicKey,
+    });
+
+    if (!signatureValid) {
+      socket.emit('error', { code: 'INVALID_SIGNATURE', message: 'Message signature verification failed' });
+      return;
+    }
+
     const msgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     
     const message = {
@@ -281,6 +576,11 @@ io.on('connection', (socket) => {
       fromEmoji: session.emoji,
       fromUsername: session.username,
       bodyCiphertext,
+      bodyIv,
+      bodyFormat,
+      wrappedKeys,
+      signature,
+      signingPublicKey,
       sentAt,
       serverReceivedAt: Date.now(),
       autoShredAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
@@ -303,6 +603,7 @@ io.on('connection', (socket) => {
     // Broadcast to room
     broadcastToRoom(session.roomCode, 'msg.new', {
       roomId: room.id,
+      roomCode: session.roomCode,
       ...message,
     });
 
@@ -312,6 +613,10 @@ io.on('connection', (socket) => {
   socket.on('typing.set', (payload) => {
     const session = userSessions.get(sessionId);
     if (!session || !session.roomCode) return;
+
+    if (!enforceSocketRateLimit(sessionId, 'typing.set', NODE_ENV === 'production' ? 180 : 720)) {
+      return;
+    }
 
     const room = getRoomByCode(session.roomCode);
     if (!room) return;

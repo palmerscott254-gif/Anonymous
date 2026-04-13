@@ -33,8 +33,10 @@ Current implementation:
 - ✅ WebSocket transport (WSS in production)
 - ✅ Per-room isolation
 - ✅ Message auto-expiry
-- ⏳ End-to-end encryption (planned)
-- ⏳ Message signing (planned)
+- ✅ End-to-end encryption (ECDH + AES-GCM envelope)
+- ✅ Message signing (ECDSA P-256 verification)
+- ✅ CORS allowlist enforcement (production)
+- ✅ API and socket rate limiting
 
 ## 📦 Production Deployment
 

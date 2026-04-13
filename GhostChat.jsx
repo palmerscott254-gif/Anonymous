@@ -155,6 +155,213 @@ async function copyTextToClipboard(text) {
   }
 }
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64Value = "") {
+  const normalized = String(base64Value || "").trim();
+  const binary = atob(normalized);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function getCryptoSubtle() {
+  if (!window?.crypto?.subtle) {
+    throw new Error("WebCrypto not available");
+  }
+  return window.crypto.subtle;
+}
+
+function getRandomBytes(length) {
+  const bytes = new Uint8Array(length);
+  window.crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+async function exportPublicKeyBase64(key) {
+  const subtle = getCryptoSubtle();
+  const spki = await subtle.exportKey("spki", key);
+  return bytesToBase64(new Uint8Array(spki));
+}
+
+async function importEncryptionPublicKey(base64Key) {
+  const subtle = getCryptoSubtle();
+  return subtle.importKey(
+    "spki",
+    base64ToBytes(base64Key),
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    []
+  );
+}
+
+async function importSigningPublicKey(base64Key) {
+  const subtle = getCryptoSubtle();
+  return subtle.importKey(
+    "spki",
+    base64ToBytes(base64Key),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"]
+  );
+}
+
+async function generateKeyMaterial() {
+  const subtle = getCryptoSubtle();
+  const [encryptionKeyPair, signingKeyPair] = await Promise.all([
+    subtle.generateKey(
+      { name: "ECDH", namedCurve: "P-256" },
+      false,
+      ["deriveBits"]
+    ),
+    subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign", "verify"]
+    ),
+  ]);
+
+  const [encryptionPublicKey, signingPublicKey] = await Promise.all([
+    exportPublicKeyBase64(encryptionKeyPair.publicKey),
+    exportPublicKeyBase64(signingKeyPair.publicKey),
+  ]);
+
+  return {
+    encryptionKeyPair,
+    signingKeyPair,
+    encryptionPublicKey,
+    signingPublicKey,
+  };
+}
+
+function buildSignedMessageBlob(payload) {
+  return JSON.stringify({
+    clientMsgId: String(payload.clientMsgId || ""),
+    sentAt: Number(payload.sentAt || 0),
+    bodyCiphertext: String(payload.bodyCiphertext || ""),
+    bodyIv: String(payload.bodyIv || ""),
+    bodyFormat: String(payload.bodyFormat || ""),
+    wrappedKeys: payload.wrappedKeys && typeof payload.wrappedKeys === "object" ? payload.wrappedKeys : {},
+  });
+}
+
+async function signMessagePayload(signingPrivateKey, payload) {
+  const subtle = getCryptoSubtle();
+  const signature = await subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    signingPrivateKey,
+    textEncoder.encode(buildSignedMessageBlob(payload))
+  );
+  return bytesToBase64(new Uint8Array(signature));
+}
+
+async function verifyMessagePayloadSignature(signingPublicKey, payload, signatureBase64) {
+  const subtle = getCryptoSubtle();
+  return subtle.verify(
+    { name: "ECDSA", hash: "SHA-256" },
+    signingPublicKey,
+    base64ToBytes(signatureBase64),
+    textEncoder.encode(buildSignedMessageBlob(payload))
+  );
+}
+
+async function deriveWrapKey(sharedSecretBytes, saltBytes) {
+  const subtle = getCryptoSubtle();
+  const secretMaterial = await subtle.importKey("raw", sharedSecretBytes, "HKDF", false, ["deriveKey"]);
+  return subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: saltBytes,
+      info: textEncoder.encode("ghostchat-e2ee-wrap-v1"),
+    },
+    secretMaterial,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+async function encryptEnvelopeForRecipients({ envelope, senderPrivateEncryptionKey, recipients }) {
+  const subtle = getCryptoSubtle();
+  const contentKeyBytes = getRandomBytes(32);
+  const contentKey = await subtle.importKey("raw", contentKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+  const bodyIvBytes = getRandomBytes(12);
+
+  const plaintext = textEncoder.encode(JSON.stringify(envelope));
+  const ciphertext = await subtle.encrypt({ name: "AES-GCM", iv: bodyIvBytes }, contentKey, plaintext);
+
+  const wrappedKeys = {};
+  for (const recipient of recipients) {
+    const recipientPublicKey = await importEncryptionPublicKey(recipient.encryptionPublicKey);
+    const sharedBits = await subtle.deriveBits(
+      { name: "ECDH", public: recipientPublicKey },
+      senderPrivateEncryptionKey,
+      256
+    );
+    const wrapSalt = getRandomBytes(16);
+    const wrapIv = getRandomBytes(12);
+    const wrapKey = await deriveWrapKey(new Uint8Array(sharedBits), wrapSalt);
+    const wrapped = await subtle.encrypt({ name: "AES-GCM", iv: wrapIv }, wrapKey, contentKeyBytes);
+
+    wrappedKeys[recipient.peerId] = {
+      iv: bytesToBase64(wrapIv),
+      salt: bytesToBase64(wrapSalt),
+      ciphertext: bytesToBase64(new Uint8Array(wrapped)),
+    };
+  }
+
+  return {
+    bodyCiphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    bodyIv: bytesToBase64(bodyIvBytes),
+    wrappedKeys,
+  };
+}
+
+async function decryptEnvelopeFromPayload({ payload, myPeerId, myPrivateEncryptionKey, senderEncryptionPublicKey }) {
+  const subtle = getCryptoSubtle();
+  const wrapped = payload?.wrappedKeys?.[myPeerId];
+  if (!wrapped || !wrapped.ciphertext || !wrapped.iv || !wrapped.salt) {
+    throw new Error("Missing wrapped key for recipient");
+  }
+
+  const senderPublicKey = await importEncryptionPublicKey(senderEncryptionPublicKey);
+  const sharedBits = await subtle.deriveBits(
+    { name: "ECDH", public: senderPublicKey },
+    myPrivateEncryptionKey,
+    256
+  );
+
+  const wrapKey = await deriveWrapKey(new Uint8Array(sharedBits), base64ToBytes(wrapped.salt));
+  const contentKeyRaw = await subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(wrapped.iv) },
+    wrapKey,
+    base64ToBytes(wrapped.ciphertext)
+  );
+
+  const contentKey = await subtle.importKey("raw", contentKeyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
+  const plaintext = await subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(payload.bodyIv) },
+    contentKey,
+    base64ToBytes(payload.bodyCiphertext)
+  );
+
+  return JSON.parse(textDecoder.decode(plaintext));
+}
+
 function ShieldIcon({ size = 14, color = COLORS.accent }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1711,7 +1918,91 @@ export default function GhostChat() {
 
   // Socket.IO integration
   const { connected, peerId, emit: socketEmit, on: socketOn } = useSocket(profile);
-  const socketListenersRef = useRef({});
+  const ownKeyMaterialRef = useRef(null);
+  const ownKeyMaterialPromiseRef = useRef(null);
+  const roomMemberKeysRef = useRef({});
+
+  const ensureOwnKeyMaterial = async () => {
+    if (ownKeyMaterialRef.current) {
+      return ownKeyMaterialRef.current;
+    }
+
+    if (!ownKeyMaterialPromiseRef.current) {
+      ownKeyMaterialPromiseRef.current = generateKeyMaterial()
+        .then((material) => {
+          ownKeyMaterialRef.current = material;
+          return material;
+        })
+        .catch((error) => {
+          ownKeyMaterialPromiseRef.current = null;
+          throw error;
+        });
+    }
+
+    return ownKeyMaterialPromiseRef.current;
+  };
+
+  const setRoomMembersForCode = (roomCode, members = []) => {
+    const normalizedCode = normalizePeerCode(roomCode);
+    if (!normalizedCode) return;
+    const next = {};
+
+    members.forEach((member) => {
+      if (!member?.peerId) return;
+      const encryptionPublicKey = member?.e2ee?.encryptionPublicKey;
+      const signingPublicKey = member?.e2ee?.signingPublicKey;
+      if (!encryptionPublicKey || !signingPublicKey) return;
+      next[member.peerId] = {
+        peerId: member.peerId,
+        encryptionPublicKey,
+        signingPublicKey,
+      };
+    });
+
+    roomMemberKeysRef.current[normalizedCode] = next;
+  };
+
+  const upsertRoomMember = (roomCode, member) => {
+    const normalizedCode = normalizePeerCode(roomCode);
+    if (!normalizedCode || !member?.peerId) return;
+    const encryptionPublicKey = member?.e2ee?.encryptionPublicKey;
+    const signingPublicKey = member?.e2ee?.signingPublicKey;
+    if (!encryptionPublicKey || !signingPublicKey) return;
+
+    const roomMembers = roomMemberKeysRef.current[normalizedCode] || {};
+    roomMemberKeysRef.current[normalizedCode] = {
+      ...roomMembers,
+      [member.peerId]: {
+        peerId: member.peerId,
+        encryptionPublicKey,
+        signingPublicKey,
+      },
+    };
+  };
+
+  const removeRoomMember = (roomCode, memberPeerId) => {
+    const normalizedCode = normalizePeerCode(roomCode);
+    if (!normalizedCode || !memberPeerId) return;
+    const roomMembers = roomMemberKeysRef.current[normalizedCode];
+    if (!roomMembers) return;
+    const { [memberPeerId]: _removed, ...rest } = roomMembers;
+    roomMemberKeysRef.current[normalizedCode] = rest;
+  };
+
+  const getRoomByCodeValue = (roomCode) => {
+    const key = normalizePeerCode(roomCode);
+    if (!key) return null;
+    if (roomDirectory[key]) return roomDirectory[key];
+    const fromChats = chats.find((item) => normalizePeerCode(item.code) === key);
+    if (fromChats) return fromChats;
+    return groups.find((item) => normalizePeerCode(item.code) === key) || null;
+  };
+
+  useEffect(() => {
+    ensureOwnKeyMaterial().catch((error) => {
+      console.error("[E2EE] Failed to initialize key material", error);
+    });
+  }, []);
 
   useEffect(() => {
     if (!document.getElementById("gc-fonts")) {
@@ -1756,6 +2047,7 @@ export default function GhostChat() {
           console.log('[SOCKET.RECEIVED] room.joined', payload);
           const { roomCode } = payload;
           const key = normalizePeerCode(roomCode);
+          setRoomMembersForCode(roomCode, payload.members || []);
           // Update room online status and member count
           setRoomDirectory(prev => {
             const room = prev[key];
@@ -1769,22 +2061,69 @@ export default function GhostChat() {
 
       // Listen for msg.new (incoming messages)
       unsubscribers.push(
-        socketOn('msg.new', (payload) => {
+        socketOn('msg.new', async (payload) => {
           console.log('[SOCKET.RECEIVED] msg.new', payload);
-          const { fromPeerId, bodyCiphertext, sentAt, autoShredAt, attachment } = payload;
+          const { fromPeerId, bodyCiphertext, sentAt, autoShredAt, attachment, roomCode } = payload;
           if (fromPeerId === peerId) return; // Skip own messages
-          
-          const localRoomId = activeChat?.id;
+
+          const room = getRoomByCodeValue(roomCode);
+          const localRoomId = room?.id;
           if (!localRoomId) return;
+
+          let text = bodyCiphertext;
+          let resolvedAttachment = attachment || null;
+
+          if (payload?.bodyFormat === "E2EE_V1") {
+            try {
+              const keyMaterial = await ensureOwnKeyMaterial();
+              const roomMembers = roomMemberKeysRef.current[normalizePeerCode(roomCode)] || {};
+              const senderInfo = roomMembers[fromPeerId];
+              if (!senderInfo?.signingPublicKey || !senderInfo?.encryptionPublicKey) {
+                throw new Error("Missing sender public key metadata");
+              }
+
+              const signingKey = await importSigningPublicKey(senderInfo.signingPublicKey);
+              const valid = await verifyMessagePayloadSignature(
+                signingKey,
+                {
+                  clientMsgId: payload.clientMsgId,
+                  sentAt: payload.sentAt,
+                  bodyCiphertext: payload.bodyCiphertext,
+                  bodyIv: payload.bodyIv,
+                  bodyFormat: payload.bodyFormat,
+                  wrappedKeys: payload.wrappedKeys,
+                },
+                payload.signature
+              );
+
+              if (!valid) {
+                throw new Error("Invalid message signature");
+              }
+
+              const envelope = await decryptEnvelopeFromPayload({
+                payload,
+                myPeerId: peerId,
+                myPrivateEncryptionKey: keyMaterial.encryptionKeyPair.privateKey,
+                senderEncryptionPublicKey: senderInfo.encryptionPublicKey,
+              });
+
+              text = typeof envelope?.text === "string" ? envelope.text : "";
+              resolvedAttachment = envelope?.attachment || null;
+            } catch (error) {
+              console.error("[E2EE] Failed to decrypt incoming message", error);
+              text = "[Unable to decrypt message]";
+              resolvedAttachment = null;
+            }
+          }
 
           const message = {
             id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             from: "them",
-            text: bodyCiphertext,
+            text,
             time: new Date(sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             read: true,
             expiresAt: autoShredAt,
-            attachment,
+            attachment: resolvedAttachment,
           };
 
           setMessagesByRoom(prev => ({
@@ -1806,6 +2145,16 @@ export default function GhostChat() {
       unsubscribers.push(
         socketOn('room.member_joined', (payload) => {
           console.log('[SOCKET.RECEIVED] room.member_joined', payload);
+          if (payload?.roomId && activeChat?.id !== payload.roomId) {
+            const roomById = [...chats, ...groups].find((entry) => entry.id === payload.roomId);
+            if (roomById?.code) {
+              upsertRoomMember(roomById.code, payload);
+            }
+            return;
+          }
+          if (activeChat?.code) {
+            upsertRoomMember(activeChat.code, payload);
+          }
           // Update room members
         })
       );
@@ -1814,6 +2163,16 @@ export default function GhostChat() {
       unsubscribers.push(
         socketOn('room.member_left', (payload) => {
           console.log('[SOCKET.RECEIVED] room.member_left', payload);
+          if (payload?.roomId && activeChat?.id !== payload.roomId) {
+            const roomById = [...chats, ...groups].find((entry) => entry.id === payload.roomId);
+            if (roomById?.code) {
+              removeRoomMember(roomById.code, payload.peerId);
+            }
+            return;
+          }
+          if (activeChat?.code) {
+            removeRoomMember(activeChat.code, payload.peerId);
+          }
           // Update room members
         })
       );
@@ -1822,7 +2181,7 @@ export default function GhostChat() {
     return () => {
       unsubscribers.forEach(unsub => unsub?.());
     };
-  }, [connected, socketOn, peerId, activeChat?.id]);
+  }, [connected, socketOn, peerId, activeChat?.id, activeChat?.code, chats, groups, roomDirectory]);
 
   useEffect(() => {
     window.localStorage.setItem("gc.settings", JSON.stringify(settings));
@@ -1890,7 +2249,7 @@ export default function GhostChat() {
     return room;
   };
 
-  const sendMessage = (roomId, text, autoShredSeconds = 0, attachment = null) => {
+  const sendMessage = async (roomId, text, autoShredSeconds = 0, attachment = null) => {
     if (!roomId || (!text?.trim() && !attachment)) return;
     if (!connected) {
       console.warn('[MSG] Cannot send: socket not connected');
@@ -1899,6 +2258,45 @@ export default function GhostChat() {
 
     const clientMsgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const summaryText = text?.trim() || (attachment ? (isImageMimeType(attachment.mimeType) ? attachment.name || "Image" : attachment.name || "File") : "");
+    const activeRoom = activeChat;
+    if (!activeRoom?.code) {
+      console.warn('[MSG] No active room code available for encryption');
+      return;
+    }
+
+    const keyMaterial = await ensureOwnKeyMaterial();
+    const roomKey = normalizePeerCode(activeRoom.code);
+    const roomMembers = Object.values(roomMemberKeysRef.current[roomKey] || {});
+    const recipients = roomMembers.filter((member) => member?.encryptionPublicKey);
+
+    if (settings.endToEndEncryption && recipients.length === 0) {
+      console.warn('[E2EE] Missing recipient public keys; cannot send encrypted message');
+      return;
+    }
+
+    const envelope = {
+      text: text?.trim() || "",
+      attachment,
+      version: 1,
+    };
+
+    const encryptedBody = await encryptEnvelopeForRecipients({
+      envelope,
+      senderPrivateEncryptionKey: keyMaterial.encryptionKeyPair.privateKey,
+      recipients,
+    });
+
+    const signedPayload = {
+      clientMsgId,
+      sentAt: Date.now(),
+      bodyCiphertext: encryptedBody.bodyCiphertext,
+      bodyIv: encryptedBody.bodyIv,
+      bodyFormat: 'E2EE_V1',
+      wrappedKeys: encryptedBody.wrappedKeys,
+    };
+
+    const signature = await signMessagePayload(keyMaterial.signingKeyPair.privateKey, signedPayload);
+
     const message = {
       id: clientMsgId,
       from: "me",
@@ -1919,18 +2317,19 @@ export default function GhostChat() {
     setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
     setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
 
-    // Emit via socket
-    const activeRoom = activeChat;
-    if (activeRoom?.code) {
-      socketEmit('msg.send', {
-        roomId: activeRoom.id,
-        clientMsgId,
-        bodyCiphertext: text?.trim() || summaryText,
-        sentAt: Date.now(),
-        autoShredSeconds,
-        attachment,
-      });
-    }
+    socketEmit('msg.send', {
+      roomId: activeRoom.id,
+      clientMsgId,
+      bodyCiphertext: encryptedBody.bodyCiphertext,
+      bodyIv: encryptedBody.bodyIv,
+      bodyFormat: 'E2EE_V1',
+      wrappedKeys: encryptedBody.wrappedKeys,
+      sentAt: signedPayload.sentAt,
+      autoShredSeconds,
+      attachment: null,
+      signature,
+      signingPublicKey: keyMaterial.signingPublicKey,
+    });
   };
 
   const pruneRoomMessages = (roomId) => {
@@ -1955,13 +2354,23 @@ export default function GhostChat() {
 
     // Emit room.join to socket if connected
     if (connected && room?.code) {
-      socketEmit('room.join', {
-        roomCode: room.code,
-        identity: {
-          username: profile.username,
-          emoji: profile.emoji,
-        },
-      });
+      ensureOwnKeyMaterial()
+        .then((keyMaterial) => {
+          socketEmit('room.join', {
+            roomCode: room.code,
+            identity: {
+              username: profile.username,
+              emoji: profile.emoji,
+              keys: {
+                encryptionPublicKey: keyMaterial.encryptionPublicKey,
+                signingPublicKey: keyMaterial.signingPublicKey,
+              },
+            },
+          });
+        })
+        .catch((error) => {
+          console.error('[E2EE] Unable to join room without key material', error);
+        });
     }
 
     return { ok: true };
