@@ -91,9 +91,13 @@ export function useSocket(identity) {
     }
   }, [identity?.username, identity?.emoji]);
 
-  const emit = (eventName, payload) => {
+  const emit = (eventName, payload, ack) => {
     if (socketRef.current?.connected) {
-      socketRef.current.emit(eventName, payload);
+      if (typeof ack === 'function') {
+        socketRef.current.emit(eventName, payload, ack);
+      } else {
+        socketRef.current.emit(eventName, payload);
+      }
     } else {
       console.warn(`[SOCKET] Cannot emit ${eventName}: not connected`);
     }

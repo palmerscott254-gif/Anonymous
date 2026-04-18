@@ -112,6 +112,12 @@ function formatFileSize(bytes = 0) {
   return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
 }
 
+function appendMessageUnique(items = [], nextMessage) {
+  if (!nextMessage?.id) return [...items, nextMessage];
+  if (items.some((item) => item.id === nextMessage.id)) return items;
+  return [...items, nextMessage];
+}
+
 function isImageMimeType(mime = "") {
   return /^image\//i.test(mime);
 }
@@ -482,6 +488,15 @@ function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
       return;
     }
     const resolvedCode = displayPeerCode(normalizedCode);
+    const existing = [...chats, ...groups].find((item) => normalizePeerCode(item.code) === normalizedCode);
+    if (existing) {
+      onOpen(existing);
+      setShowNew(false);
+      setPeerCode("");
+      setTunnelError("");
+      return;
+    }
+
     const newChat = {
       id: Date.now(),
       name: `🔐 Peer ${resolvedCode}`,
@@ -1181,17 +1196,17 @@ function CodeGenScreen({ onGenerateRoom }) {
   const [copyState, setCopyState] = useState("idle");
   const [expiry, setExpiry] = useState(10);
 
-  const generateCode = () => {
+  const generateCode = async () => {
     if (generating) return;
     setGenerating(true);
     setCopyState("idle");
 
-    window.setTimeout(() => {
-      const nextCode = generatePeerCode();
-      setCode(nextCode);
-      onGenerateRoom(nextCode, expiry);
+    try {
+      const nextCode = await onGenerateRoom(expiry);
+      setCode(nextCode || null);
+    } finally {
       setGenerating(false);
-    }, 1200);
+    }
   };
 
   const copyCode = async () => {
@@ -1383,6 +1398,7 @@ function CodeGenScreen({ onGenerateRoom }) {
 function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
   const [showCreate, setShowCreate] = useState(false);
   const [groupName, setGroupName] = useState("");
+  const [createError, setCreateError] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState("🛸");
   const [latestGroupCode, setLatestGroupCode] = useState("");
   const [copyState, setCopyState] = useState({});
@@ -1450,31 +1466,54 @@ function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
 
           <input
             value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
+            onChange={(e) => {
+              setGroupName(e.target.value);
+              if (createError) setCreateError("");
+            }}
             placeholder={`${selectedEmoji} Group name...`}
             style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 13, outline: "none", marginBottom: 10 }}
           />
 
+          {createError ? (
+            <div style={{ marginBottom: 10, fontFamily: SANS, fontSize: 12, color: COLORS.red }}>{createError}</div>
+          ) : null}
+
           <button
             type="button"
             onClick={() => {
-              const name = `${selectedEmoji} ${groupName.trim() || "Ghost Group"}`;
-              const codeValue = generatePeerCode();
-              const createdRoom = onCreateGroupRoom({
-                id: Date.now(),
-                name,
-                members: 1,
-                online: true,
-                isGroup: true,
-                unread: 0,
-                last: "Group tunnel created",
-                time: "now",
-                code: codeValue,
-              });
-              setLatestGroupCode(createdRoom?.code || codeValue);
-              setShowCreate(false);
-              setGroupName("");
-            }}
+                const rawName = groupName.trim() || "Ghost Group";
+                const normalizedTargetName = stripLeadingEmoji(rawName).toLowerCase();
+                const existingGroup = groups.find(
+                  (item) => stripLeadingEmoji(item?.name || "").toLowerCase() === normalizedTargetName
+                );
+
+                if (existingGroup) {
+                  setCreateError("A group with this name already exists.");
+                  setLatestGroupCode(existingGroup.code || "");
+                  return;
+                }
+
+                onCreateGroupRoom({
+                  name: `${selectedEmoji} ${rawName}`,
+                  emoji: selectedEmoji,
+                  expiryMinutes: 60,
+                  members: 1,
+                  online: true,
+                  isGroup: true,
+                  unread: 0,
+                  last: "Group tunnel created",
+                  time: "now",
+                })
+                  .then((createdRoom) => {
+                    setLatestGroupCode(createdRoom?.code || "");
+                    setCreateError("");
+                    setShowCreate(false);
+                    setGroupName("");
+                  })
+                  .catch((error) => {
+                    console.error("[ROOM] Failed to create group room", error);
+                  });
+              }}
             style={{
               width: "100%",
               border: "none",
@@ -2020,27 +2059,6 @@ export default function GhostChat() {
     const unsubscribers = [];
 
     if (connected) {
-      // Listen for room.code_generated
-      unsubscribers.push(
-        socketOn('room.code_generated', (payload) => {
-          console.log('[SOCKET.RECEIVED] room.code_generated', payload);
-          const { roomCode, expiresAt } = payload;
-          registerRoom(
-            {
-              id: `room-${normalizePeerCode(roomCode)}`,
-              name: "🧠 Ghost Link",
-              unread: 0,
-              time: "now",
-              last: "Tunnel ready",
-              online: true,
-              code: roomCode,
-            },
-            roomCode,
-            { expiryMinutes: Math.ceil((expiresAt - Date.now()) / (60 * 1000)) }
-          );
-        })
-      );
-
       // Listen for room.joined
       unsubscribers.push(
         socketOn('room.joined', (payload) => {
@@ -2117,7 +2135,7 @@ export default function GhostChat() {
           }
 
           const message = {
-            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: payload.clientMsgId || payload.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             from: "them",
             text,
             time: new Date(sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -2126,10 +2144,13 @@ export default function GhostChat() {
             attachment: resolvedAttachment,
           };
 
-          setMessagesByRoom(prev => ({
-            ...prev,
-            [localRoomId]: [...(prev[localRoomId] || []), message],
-          }));
+          setMessagesByRoom(prev => {
+            const current = prev[localRoomId] || [];
+            return {
+              ...prev,
+              [localRoomId]: appendMessageUnique(current, message),
+            };
+          });
         })
       );
 
@@ -2212,18 +2233,22 @@ export default function GhostChat() {
   }, [messagesByRoom]);
 
   const registerRoom = (chatLike, rawCode, options = {}) => {
-    const code = displayPeerCode(rawCode || chatLike?.code || generatePeerCode());
+    const code = displayPeerCode(rawCode || chatLike?.code || "");
     const key = normalizePeerCode(code);
     if (!key) return chatLike;
     const now = Date.now();
+    const existingByCode =
+      roomDirectory[key] ||
+      chats.find((item) => normalizePeerCode(item.code) === key) ||
+      groups.find((item) => normalizePeerCode(item.code) === key);
     const ttlMinutes = Number(options?.expiryMinutes || chatLike?.ttlMinutes || 0);
     const expiresAt = ttlMinutes > 0 ? now + ttlMinutes * 60 * 1000 : chatLike?.expiresAt;
     const room = {
       ...chatLike,
       code,
       online: typeof chatLike?.online === "boolean" ? chatLike.online : true,
-      id: chatLike?.id || `room-${key}`,
-      createdAt: chatLike?.createdAt || now,
+      id: existingByCode?.id || chatLike?.id || `room-${key}`,
+      createdAt: existingByCode?.createdAt || chatLike?.createdAt || now,
       expiresAt,
     };
     setRoomDirectory((prev) => ({ ...prev, [key]: room }));
@@ -2308,10 +2333,13 @@ export default function GhostChat() {
     };
 
     // Add to local state immediately for UI responsiveness
-    setMessagesByRoom((prev) => ({
-      ...prev,
-      [roomId]: [...(prev[roomId] || []), message],
-    }));
+    setMessagesByRoom((prev) => {
+      const current = prev[roomId] || [];
+      return {
+        ...prev,
+        [roomId]: appendMessageUnique(current, message),
+      };
+    });
 
     const lastText = summaryText || "Attachment sent";
     setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
@@ -2377,25 +2405,40 @@ export default function GhostChat() {
   };
 
   const createGroupRoom = (groupLike) => {
-    const createdRoom = registerRoom(
-      {
-        ...groupLike,
-        isGroup: true,
-        last: groupLike?.last || "Group tunnel created",
-      },
-      groupLike?.code,
-      { expiryMinutes: groupLike?.expiryMinutes || 60 }
-    );
+    return new Promise((resolve, reject) => {
+      if (!connected) {
+        reject(new Error("Socket not connected"));
+        return;
+      }
 
-    if (connected && createdRoom?.code) {
-      socketEmit('room.generate_code', {
-        kind: 'group',
-        ttlMinutes: groupLike?.expiryMinutes || 60,
-        roomCode: createdRoom.code,
-      });
-    }
+      socketEmit(
+        'room:generate',
+        {
+          kind: 'group',
+          ttlMinutes: groupLike?.expiryMinutes || 60,
+          name: groupLike?.name || 'Ghost Group',
+        },
+        (response) => {
+          if (!response?.ok || !response?.room?.code) {
+            reject(new Error(response?.error || 'Failed to generate room code'));
+            return;
+          }
 
-    return createdRoom;
+          const createdRoom = registerRoom(
+            {
+              ...groupLike,
+              ...response.room,
+              isGroup: true,
+              last: groupLike?.last || 'Group tunnel created',
+            },
+            response.room.code,
+            { expiryMinutes: groupLike?.expiryMinutes || 60 }
+          );
+
+          resolve(createdRoom);
+        }
+      );
+    });
   };
 
   const stats = {
@@ -2424,29 +2467,45 @@ export default function GhostChat() {
   } else if (tab === "codegen") {
     content =
       <CodeGenScreen
-        onGenerateRoom={(codeValue, expiry) => {
-          // Register locally first
-          registerRoom(
-            {
-              id: `room-${normalizePeerCode(codeValue)}`,
-              name: "🧠 Ghost Link",
-              unread: 0,
-              time: "now",
-              last: `Secure key active ${expiry}m`,
-              online: true,
-            },
-            codeValue,
-            { expiryMinutes: expiry }
-          );
-          
-          // Emit to socket to generate server-side room
-          if (connected) {
-            socketEmit('room.generate_code', {
-              kind: 'direct',
-              ttlMinutes: expiry,
-              roomCode: codeValue,
-            });
+        onGenerateRoom={async (expiry) => {
+          if (!connected) {
+            throw new Error("Socket not connected");
           }
+
+          return new Promise((resolve, reject) => {
+            socketEmit(
+              'room:generate',
+              {
+                kind: 'direct',
+                ttlMinutes: expiry,
+                name: '🧠 Ghost Link',
+              },
+              (response) => {
+                if (!response?.ok || !response?.room?.code) {
+                  reject(new Error(response?.error || 'Failed to generate room code'));
+                  return;
+                }
+
+                const createdRoom = registerRoom(
+                  {
+                    id: response.room.id,
+                    name: response.room.name || '🧠 Ghost Link',
+                    unread: 0,
+                    time: 'now',
+                    last: `Secure key active ${expiry}m`,
+                    online: true,
+                    code: response.room.code,
+                    createdAt: response.room.createdAt,
+                    expiresAt: response.room.expiresAt,
+                  },
+                  response.room.code,
+                  { expiryMinutes: expiry }
+                );
+
+                resolve(createdRoom?.code || response.room.code);
+              }
+            );
+          });
         }}
       />;
   } else if (tab === "groups") {

@@ -276,13 +276,22 @@ function generatePeerId() {
 function generateInviteCode() {
   const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   const digits = '23456789';
-  const first = letters[Math.floor(Math.random() * letters.length)];
-  const second = letters[Math.floor(Math.random() * letters.length)];
-  const tail = Array.from({ length: 4 }, () => digits[Math.floor(Math.random() * digits.length)]).join('');
-  return `${first}${second}-${tail}`;
+  let code = '';
+  do {
+    const first = letters[Math.floor(Math.random() * letters.length)];
+    const second = letters[Math.floor(Math.random() * letters.length)];
+    const tail = Array.from({ length: 4 }, () => digits[Math.floor(Math.random() * digits.length)]).join('');
+    code = `${first}${second}-${tail}`;
+  } while (rooms.has(code));
+  return code;
 }
 
 function createRoom(code, ttlMinutes = 10, kind = 'direct') {
+  const existing = getRoomByCode(code);
+  if (existing) {
+    return existing;
+  }
+
   const now = Date.now();
   const expiresAt = now + (ttlMinutes * 60 * 1000);
   
@@ -295,6 +304,7 @@ function createRoom(code, ttlMinutes = 10, kind = 'direct') {
     members: new Map(), // peerId -> { emoji, username, online, socket }
     messages: [],
     typingSet: new Set(),
+    clientMessageIds: new Set(),
   };
   
   rooms.set(code, room);
@@ -372,14 +382,17 @@ io.on('connection', (socket) => {
     }
 
     const { ttlMinutes = 10, roomCode, kind = 'direct' } = payload;
-    const code = normalizeRoomCode(roomCode) || generateInviteCode();
-    const room = createRoom(code, ttlMinutes, kind);
+    const safeTtlMinutes = Math.max(1, Math.min(24 * 60, Math.floor(Number(ttlMinutes) || 10)));
+    const normalizedRequestedCode = normalizeRoomCode(roomCode);
+    const code = normalizedRequestedCode || generateInviteCode();
+    const safeKind = kind === 'group' ? 'group' : 'direct';
+    const room = createRoom(code, safeTtlMinutes, safeKind);
 
     socket.emit('room.code_generated', {
       roomId: room.id,
       roomCode: code,
       expiresAt: room.expiresAt,
-      kind,
+      kind: safeKind,
     });
     
     console.log(`[ROOM.GENERATED] ${code} expires at ${new Date(room.expiresAt).toISOString()}`);
@@ -429,6 +442,8 @@ io.on('connection', (socket) => {
     };
     userSessions.set(sessionId, session);
 
+    const alreadyJoined = room.members.has(session.peerId);
+
     // Add member to room
     room.members.set(session.peerId, {
       peerId: session.peerId,
@@ -468,17 +483,19 @@ io.on('connection', (socket) => {
       },
     });
 
-    // Notify others
-    broadcastToRoom(roomCode, 'room.member_joined', {
-      roomId: room.id,
-      peerId: session.peerId,
-      username: session.username,
-      emoji: session.emoji,
-      e2ee: {
-        encryptionPublicKey,
-        signingPublicKey,
-      },
-    });
+    if (!alreadyJoined) {
+      // Notify others
+      broadcastToRoom(roomCode, 'room.member_joined', {
+        roomId: room.id,
+        peerId: session.peerId,
+        username: session.username,
+        emoji: session.emoji,
+        e2ee: {
+          encryptionPublicKey,
+          signingPublicKey,
+        },
+      });
+    }
 
     console.log(`[ROOM.JOINED] ${session.peerId} → ${roomCode} (${room.members.size} total)`);
   });
@@ -513,6 +530,16 @@ io.on('connection', (socket) => {
       signature,
       signingPublicKey,
     } = payload;
+
+    const normalizedClientMsgId = typeof clientMsgId === 'string' ? clientMsgId.trim().slice(0, 120) : '';
+    if (!normalizedClientMsgId) {
+      socket.emit('error', { code: 'BAD_REQUEST', message: 'Missing clientMsgId' });
+      return;
+    }
+
+    if (room.clientMessageIds.has(normalizedClientMsgId)) {
+      return;
+    }
 
     if (bodyFormat !== 'E2EE_V1') {
       socket.emit('error', { code: 'E2EE_REQUIRED', message: 'Plaintext messages are not accepted' });
@@ -552,7 +579,7 @@ io.on('connection', (socket) => {
     }
 
     const signatureValid = await verifyMessageSignature({
-      clientMsgId,
+      clientMsgId: normalizedClientMsgId,
       sentAt,
       bodyCiphertext,
       bodyIv,
@@ -571,7 +598,7 @@ io.on('connection', (socket) => {
     
     const message = {
       msgId,
-      clientMsgId,
+      clientMsgId: normalizedClientMsgId,
       fromPeerId: session.peerId,
       fromEmoji: session.emoji,
       fromUsername: session.username,
@@ -588,14 +615,18 @@ io.on('connection', (socket) => {
     };
 
     room.messages.push(message);
+    room.clientMessageIds.add(normalizedClientMsgId);
     if (room.messages.length > MESSAGE_HISTORY_LIMIT) {
-      room.messages.shift();
+      const removed = room.messages.shift();
+      if (removed?.clientMsgId) {
+        room.clientMessageIds.delete(removed.clientMsgId);
+      }
     }
 
     // Ack to sender
     socket.emit('msg.ack', {
       roomCode: session.roomCode,
-      clientMsgId,
+      clientMsgId: normalizedClientMsgId,
       msgId,
       deliveredAt: Date.now(),
     });
