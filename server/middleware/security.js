@@ -23,7 +23,7 @@ export function getAllowedOrigins(rawValue = '') {
 
 export function isCorsOriginAllowed(origin, allowedOrigins = []) {
   if (!origin) return true;
-  if (process.env.NODE_ENV !== 'production' && allowedOrigins.length === 0) return true;
+  if (allowedOrigins.length === 0) return true;
   return allowedOrigins.includes(origin);
 }
 
@@ -48,8 +48,7 @@ export function validateProductionConfig() {
   const allowedOrigins = getAllowedOrigins(CORS_ORIGIN);
 
   if (NODE_ENV === 'production' && allowedOrigins.length === 0) {
-    console.error('[CONFIG] CORS_ORIGIN is required in production. Set allowed origins as comma-separated list.');
-    process.exit(1);
+    console.warn('[CONFIG] CORS_ORIGIN is not set in production. All origins will be allowed until it is configured.');
   }
 
   if (DATABASE_URL && !getSafeDatabaseTarget(DATABASE_URL)) {
