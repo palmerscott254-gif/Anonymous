@@ -1,12 +1,7 @@
-/**
- * Rate Limiting Service
- * Handles HTTP and socket event rate limiting
- */
-
 const httpRateBuckets = new Map();
 const socketRateBuckets = new Map();
 
-export function isRateLimited(map, key, limit, windowMs) {
+function isRateLimited(map, key, limit, windowMs) {
   const now = Date.now();
   const bucket = map.get(key);
   if (!bucket || now > bucket.resetAt) {
@@ -24,8 +19,8 @@ export function isRateLimited(map, key, limit, windowMs) {
 
 export function enforceHttpRateLimit(req, res, next) {
   const NODE_ENV = process.env.NODE_ENV || 'development';
-  const HTTP_RATE_LIMIT_PER_MIN = NODE_ENV === 'production' ? 180 : 1200;
-  
+  const HTTP_RATE_LIMIT_PER_MIN = Number(process.env.HTTP_RATE_LIMIT_PER_MIN || (NODE_ENV === 'production' ? 180 : 1200));
+
   const ip = req.ip || req.socket?.remoteAddress || 'unknown-ip';
   const limited = isRateLimited(httpRateBuckets, `http:${ip}`, HTTP_RATE_LIMIT_PER_MIN, 60 * 1000);
   if (limited) {
@@ -38,6 +33,9 @@ export function enforceHttpRateLimit(req, res, next) {
   next();
 }
 
-export function enforceSocketRateLimit(socketId, eventName, limitPerMinute) {
-  return !isRateLimited(socketRateBuckets, `socket:${socketId}:${eventName}`, limitPerMinute, 60 * 1000);
+export function enforceSocketRateLimit({ socketId, eventName, limitPerMinute, ip = 'unknown', userId = 'anonymous' }) {
+  const bySocket = !isRateLimited(socketRateBuckets, `socket:${socketId}:${eventName}`, limitPerMinute, 60 * 1000);
+  const byIp = !isRateLimited(socketRateBuckets, `ip:${ip}:${eventName}`, limitPerMinute * 3, 60 * 1000);
+  const byUser = !isRateLimited(socketRateBuckets, `user:${userId}:${eventName}`, limitPerMinute * 2, 60 * 1000);
+  return bySocket && byIp && byUser;
 }

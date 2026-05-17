@@ -1,6 +1,13 @@
-# GhostChat Backend Server
+# GhostChat Backend Server (Archived)
 
-A modular, secure Node.js backend for real-time encrypted messaging using Socket.IO and end-to-end encryption (E2EE).
+This folder is archived for backward compatibility.
+
+Use the canonical backend at project root:
+
+- Entrypoint: `server.js`
+- Runtime modules: `server/`
+
+The duplicate backend code in this folder should not be used for new development.
 
 ## Quick Start
 

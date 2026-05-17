@@ -6,10 +6,15 @@
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
+    "start": "node server.js",
     "dev:server": "node --watch server.js",
     "dev:full": "sh -c 'npm run dev:server & npm run dev'",
     "build": "vite build",
     "preview": "vite preview",
+    "migrate": "node server/scripts/migrate.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "android:sync": "npx cap sync android",
     "android:open": "npx cap open android",
     "android:build": "cd android && ./gradlew assembleDebug"
@@ -18,15 +23,23 @@
     "@capacitor/android": "^6.2.1",
     "@capacitor/cli": "^6.2.1",
     "@capacitor/core": "^6.2.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^17.4.0",
     "express": "^4.18.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.20.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "vite": "^5.4.10"
+    "@playwright/test": "^1.45.0",
+    "supertest": "^7.2.2",
+    "vite": "^5.4.10",
+    "vitest": "^1.6.0"
   }
 }

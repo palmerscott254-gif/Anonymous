@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
+import { fetchGuestSession, getAccessToken, setAccessToken } from '../services/auth.js';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
 
@@ -14,64 +15,88 @@ export function useSocket(identity) {
 
   useEffect(() => {
     if (!socketRef.current) {
-      const socket = io(SOCKET_SERVER_URL, {
-        reconnection: true,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-        reconnectionAttempts: 5,
-      });
+      let mounted = true;
 
-      socket.on('connect', () => {
-        console.log('[SOCKET] Connected:', socket.id);
-        setConnected(true);
-        setSessionId(socket.id);
-
-        // Send session.hello
-        if (identity) {
-          socket.emit('session.hello', {
-            deviceId: socket.id,
-            identity: {
-              username: identity.username || 'Ghost',
-              emoji: identity.emoji || '👤',
-            },
-          });
+      (async () => {
+        let token = getAccessToken();
+        if (!token) {
+          try {
+            const guest = await fetchGuestSession(identity);
+            token = guest?.tokens?.accessToken || null;
+          } catch (error) {
+            console.warn('[AUTH] Guest bootstrap failed, connecting without token', error);
+          }
         }
-      });
 
-      socket.on('session.ready', (payload) => {
-        console.log('[SOCKET] Session ready:', payload);
-        setPeerId(payload.peerId);
-      });
+        if (!mounted) return;
 
-      socket.on('connect_error', (err) => {
-        console.error('[SOCKET] Connection error:', err);
-        setError(err.message);
-      });
+        const socket = io(SOCKET_SERVER_URL, {
+          reconnection: true,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          reconnectionAttempts: 5,
+          auth: token ? { token } : undefined,
+        });
 
-      socket.on('error', (payload) => {
-        console.error('[SOCKET] Error event:', payload);
-        setError(payload.message);
-      });
+        socket.on('connect', () => {
+          console.log('[SOCKET] Connected:', socket.id);
+          setConnected(true);
+          setSessionId(socket.id);
 
-      socket.on('disconnect', () => {
-        console.log('[SOCKET] Disconnected');
-        setConnected(false);
-      });
+          if (identity) {
+            socket.emit('session.hello', {
+              deviceId: socket.id,
+              token,
+              identity: {
+                username: identity.username || 'Ghost',
+                emoji: identity.emoji || '👤',
+              },
+            });
+          }
+        });
 
-      // Pass through all other events to registered listeners
-      socket.onAny((eventName, ...args) => {
-        if (listenersRef.current[eventName]) {
-          listenersRef.current[eventName].forEach(callback => {
-            try {
-              callback(...args);
-            } catch (err) {
-              console.error(`[SOCKET] Error in listener for ${eventName}:`, err);
-            }
-          });
-        }
-      });
+        socket.on('session.ready', (payload) => {
+          console.log('[SOCKET] Session ready:', payload);
+          setPeerId(payload.peerId);
+          if (payload?.accessToken) {
+            setAccessToken(payload.accessToken);
+          }
+        });
 
-      socketRef.current = socket;
+        socket.on('connect_error', (err) => {
+          console.error('[SOCKET] Connection error:', err);
+          setError(err.message);
+        });
+
+        socket.on('error', (payload) => {
+          console.error('[SOCKET] Error event:', payload);
+          setError(payload.message);
+        });
+
+        socket.on('disconnect', () => {
+          console.log('[SOCKET] Disconnected');
+          setConnected(false);
+        });
+
+        // Pass through all other events to registered listeners
+        socket.onAny((eventName, ...args) => {
+          if (listenersRef.current[eventName]) {
+            listenersRef.current[eventName].forEach(callback => {
+              try {
+                callback(...args);
+              } catch (err) {
+                console.error(`[SOCKET] Error in listener for ${eventName}:`, err);
+              }
+            });
+          }
+        });
+
+        socketRef.current = socket;
+      })();
+
+      return () => {
+        mounted = false;
+      };
     }
 
     return () => {
@@ -83,6 +108,7 @@ export function useSocket(identity) {
     if (socketRef.current?.connected && identity) {
       socketRef.current.emit('session.hello', {
         deviceId: socketRef.current.id,
+        token: getAccessToken(),
         identity: {
           username: identity.username || 'Ghost',
           emoji: identity.emoji || '👤',

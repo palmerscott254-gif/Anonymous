@@ -19,11 +19,13 @@ export function setupHealthRoutes(app, options = {}) {
   });
 
   app.get('/health/ready', (_req, res) => {
-    const ready = Boolean(process.env.DATABASE_URL);
+    const dbRequired = process.env.NODE_ENV === 'production';
+    const dbConfigured = Boolean(process.env.DATABASE_URL);
+    const ready = dbRequired ? dbConfigured : true;
     res.status(ready ? 200 : 503).json({
       ready,
-      databaseConfigured: Boolean(process.env.DATABASE_URL),
-      reason: ready ? 'ready' : 'DATABASE_URL missing',
+      databaseConfigured: dbConfigured,
+      reason: ready ? 'ready' : 'DATABASE_URL missing in production',
     });
   });
 

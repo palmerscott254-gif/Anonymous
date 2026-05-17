@@ -1,10 +1,14 @@
-Server folder: Express + Socket.IO.
+Server folder: Express + Socket.IO runtime modules.
 
 Quick start:
 
-1. Create `.env` with `JWT_SECRET` and `PORT`.
-2. Run `node server/index.js` (or `npm run start:server` if scripts added).
+1. Create `.env` from `.env.example`.
+2. Run migrations: `npm run migrate`.
+3. Run backend: `npm run server`.
+
+Canonical entrypoint: project root `server.js`.
 
 Socket usage:
-- Client should provide `auth: { token }` when connecting to Socket.IO.
-- Events are defined in `shared/events.ts`.
+- Client may connect with `auth: { token }`.
+- Guest mode is supported through `/auth/guest`.
+- Legacy and canonical event aliases are both supported.
