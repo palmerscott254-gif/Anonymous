@@ -1223,19 +1223,17 @@ export default function GhostChat() {
   return (
     <div
       style={{
+        width: "100vw",
         minHeight: "100dvh",
-        width: "100%",
         background: "#050810",
         position: "relative",
         overflow: "hidden",
         display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "0 8px",
       }}
     >
       <style>
-        {`* { box-sizing: border-box; margin: 0; padding: 0; }
+        {`html, body, #root { width: 100%; min-height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 ::-webkit-scrollbar { width: 0; }
 input::placeholder { color: #4B5563; }
 @keyframes bounce {
@@ -1247,8 +1245,7 @@ input::placeholder { color: #4B5563; }
       <div
         style={{
           width: "100%",
-          maxWidth: 420,
-          height: "100dvh",
+          minHeight: "100dvh",
           background: COLORS.bg,
           borderRadius: 0,
           overflow: "hidden",
