@@ -9,34 +9,48 @@ export function useSocket(identity) {
   const [sessionId, setSessionId] = useState(null);
   const [peerId, setPeerId] = useState(null);
   const [error, setError] = useState(null);
-  
+
   const socketRef = useRef(null);
   const listenersRef = useRef({});
 
   useEffect(() => {
-    if (!socketRef.current) {
-      let mounted = true;
+    let disposed = false;
+    let socket = socketRef.current;
 
-      (async () => {
-        let token = getAccessToken();
-        if (!token) {
-          try {
-            const guest = await fetchGuestSession(identity);
-            token = guest?.tokens?.accessToken || null;
-          } catch (error) {
-            console.warn('[AUTH] Guest bootstrap failed, connecting without token', error);
-          }
+    const handleAny = (eventName, ...args) => {
+      const callbacks = listenersRef.current[eventName];
+      if (!callbacks) return;
+      callbacks.forEach((callback) => {
+        try {
+          callback(...args);
+        } catch (err) {
+          console.error(`[SOCKET] Error in listener for ${eventName}:`, err);
         }
+      });
+    };
 
-        if (!mounted) return;
+    const connectSocket = async () => {
+      let token = getAccessToken();
+      if (!token) {
+        try {
+          const guest = await fetchGuestSession(identity);
+          token = guest?.tokens?.accessToken || null;
+        } catch (fetchError) {
+          console.warn('[AUTH] Guest bootstrap failed, connecting without token', fetchError);
+        }
+      }
 
-        const socket = io(SOCKET_SERVER_URL, {
+      if (disposed) return;
+
+      if (!socket) {
+        socket = io(SOCKET_SERVER_URL, {
           reconnection: true,
           reconnectionDelay: 1000,
           reconnectionDelayMax: 5000,
           reconnectionAttempts: 5,
           auth: token ? { token } : undefined,
         });
+        socketRef.current = socket;
 
         socket.on('connect', () => {
           console.log('[SOCKET] Connected:', socket.id);
@@ -50,6 +64,7 @@ export function useSocket(identity) {
               identity: {
                 username: identity.username || 'Ghost',
                 emoji: identity.emoji || '👤',
+                keys: identity.keys || undefined,
               },
             });
           }
@@ -70,7 +85,7 @@ export function useSocket(identity) {
 
         socket.on('error', (payload) => {
           console.error('[SOCKET] Error event:', payload);
-          setError(payload.message);
+          setError(payload?.message || 'Socket error');
         });
 
         socket.on('disconnect', () => {
@@ -78,29 +93,35 @@ export function useSocket(identity) {
           setConnected(false);
         });
 
-        // Pass through all other events to registered listeners
-        socket.onAny((eventName, ...args) => {
-          if (listenersRef.current[eventName]) {
-            listenersRef.current[eventName].forEach(callback => {
-              try {
-                callback(...args);
-              } catch (err) {
-                console.error(`[SOCKET] Error in listener for ${eventName}:`, err);
-              }
-            });
-          }
+        socket.onAny(handleAny);
+      } else if (!socket.connected) {
+        socket.auth = token ? { token } : undefined;
+        socket.connect();
+      }
+
+      if (identity && socket?.connected) {
+        socket.emit('session.hello', {
+          deviceId: socket.id,
+          token,
+          identity: {
+            username: identity.username || 'Ghost',
+            emoji: identity.emoji || '👤',
+            keys: identity.keys || undefined,
+          },
         });
+      }
+    };
 
-        socketRef.current = socket;
-      })();
-
-      return () => {
-        mounted = false;
-      };
-    }
+    connectSocket();
 
     return () => {
-      // Don't disconnect on unmount, keep connection alive
+      disposed = true;
+      if (socketRef.current) {
+        socketRef.current.offAny(handleAny);
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [identity]);
 

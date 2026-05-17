@@ -37,5 +37,32 @@ export function createRoomRepository({ dbPool }) {
         [roomId, userId]
       );
     },
+
+    async listRooms(limit = 100) {
+      if (!dbPool) return [];
+      const result = await dbPool.query(
+        `SELECT id, code, code_normalized AS "codeNormalized", name, kind,
+                EXTRACT(EPOCH FROM created_at) * 1000 AS "createdAt",
+                EXTRACT(EPOCH FROM expires_at) * 1000 AS "expiresAt"
+         FROM rooms
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [Math.min(Number(limit) || 100, 200)]
+      );
+      return result.rows;
+    },
+
+    async findRoomById(roomId) {
+      if (!dbPool || !roomId) return null;
+      const result = await dbPool.query(
+        `SELECT id, code, code_normalized AS "codeNormalized", name, kind,
+                EXTRACT(EPOCH FROM created_at) * 1000 AS "createdAt",
+                EXTRACT(EPOCH FROM expires_at) * 1000 AS "expiresAt"
+         FROM rooms
+         WHERE id = $1`,
+        [roomId]
+      );
+      return result.rows[0] || null;
+    },
   };
 }

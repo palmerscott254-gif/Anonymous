@@ -8,6 +8,10 @@ import { setupHealthRoutes } from './routes/health.js';
 import { setupSocketHandlers } from './sockets/handlers.js';
 import { enforceHttpRateLimit } from './services/rateLimit.js';
 import { getRoomStorage } from './services/room.js';
+import { createRoomRoutes } from './http/roomRoutes.js';
+import { createMessageRoutes } from './http/messageRoutes.js';
+import { createSessionRoutes } from './http/sessionRoutes.js';
+import { createUserRoutes } from './http/userRoutes.js';
 import { createUserRepository } from './repositories/userRepository.js';
 import { createRoomRepository } from './repositories/roomRepository.js';
 import { createMessageRepository } from './repositories/messageRepository.js';
@@ -60,7 +64,13 @@ export function createGhostChatRuntime({ env, dbPool }) {
   app.use(express.json({ limit: '150kb' }));
   app.use(enforceHttpRateLimit);
 
+  app.locals.messageRepository = messageRepository;
+
   app.use('/auth', createAuthRoutes({ authService }));
+  app.use('/session', createSessionRoutes({ authService, userRepository }));
+  app.use('/rooms', createRoomRoutes({ env, authService, roomRepository }));
+  app.use('/messages', createMessageRoutes({ env, authService, roomRepository, messageRepository, io }));
+  app.use('/users', createUserRoutes({ authService, userRepository }));
 
   const { rooms, userSessions } = getRoomStorage();
   setupHealthRoutes(app, { dbPool, rooms, userSessions });

@@ -3,26 +3,25 @@ import { COLORS, FONT, SANS } from "../utils/constants.js";
 import { formatFileSize, isImageMimeType, getNowHHMM, addAlpha } from "../utils/helpers.js";
 import { Avatar, LockIcon } from "./UI.jsx";
 
-export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent }) {
+export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent, onTypingChange, remoteTyping = false }) {
   const [msg, setMsg] = useState("");
   const [typing, setTyping] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
-
   useEffect(() => {
     setMsg("");
     setTyping(false);
     setPendingAttachment(null);
     setAttachmentError("");
+    onTypingChange?.(chat?.id, false);
   }, [chat?.id]);
 
   const shreddingEnabled = settings?.messageShredding ?? true;
   const tunnelEnabled = settings?.websocketTunnels ?? true;
   const encryptionEnabled = settings?.endToEndEncryption ?? true;
   const androidOptimized = settings?.androidOptimization ?? true;
-
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: androidOptimized ? "auto" : "smooth" });
   }, [messages, typing, androidOptimized]);
@@ -169,7 +168,7 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           </div>
         ))}
 
-        {typing && (
+        {(typing || remoteTyping) && (
           <div style={{ display: "flex", justifyContent: "flex-start", padding: "0 10px" }}>
             <div style={{ background: "transparent", border: "none", padding: "4px 8px", display: "flex", gap: 4 }}>
               {[0, 1, 2].map((d) => (
@@ -220,7 +219,13 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
         <input ref={fileInputRef} type="file" accept="image/*,application/pdf,.txt,.md,.csv,.zip,.mp3,.mp4,.mov,.webm,.doc,.docx" onChange={pickAttachment} style={{ display: "none" }} />
         <input
           value={msg}
-          onChange={(e) => setMsg(e.target.value)}
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            setMsg(nextValue);
+            const nextTyping = Boolean(nextValue.trim());
+            setTyping(nextTyping);
+            onTypingChange?.(chat?.id, nextTyping);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") send();
           }}

@@ -74,6 +74,48 @@ export function getRoomByCode(code) {
   return room;
 }
 
+export function getRoomById(roomId) {
+  if (!roomId) return null;
+  for (const room of rooms.values()) {
+    if (room.id === roomId) {
+      if (room.expiresAt <= Date.now()) {
+        rooms.delete(room.key);
+        return null;
+      }
+      return room;
+    }
+  }
+  return null;
+}
+
+export function listRooms() {
+  cleanupExpiredRooms();
+  return Array.from(rooms.values()).map((room) => ({
+    id: room.id,
+    code: room.code,
+    key: room.key,
+    kind: room.kind,
+    name: room.name,
+    createdAt: room.createdAt,
+    expiresAt: room.expiresAt,
+    memberCount: room.members.size,
+    messageCount: room.messages.length,
+  }));
+}
+
+export function listRoomMessages(roomCode, limit = 50) {
+  const room = getRoomByCode(roomCode);
+  if (!room) return [];
+  return room.messages.slice(-Math.max(Number(limit) || 50, 1)).map((message) => ({ ...message }));
+}
+
+export function listUserSessions() {
+  return Array.from(userSessions.entries()).map(([sessionId, session]) => ({
+    sessionId,
+    ...session,
+  }));
+}
+
 export function cleanupExpiredRooms() {
   const now = Date.now();
   const expired = [];

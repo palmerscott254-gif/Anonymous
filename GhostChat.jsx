@@ -7,6 +7,10 @@ import { SearchScreen } from "./src/components/SearchScreen.jsx";
 import { CodeGenScreen } from "./src/components/CodeGenScreen.jsx";
 import { GroupsScreen } from "./src/components/GroupsScreen.jsx";
 import { ProfileScreen } from "./src/components/ProfileScreen.jsx";
+import { listRooms as fetchRooms, createRoom as createRoomApi } from "./src/services/rooms.js";
+import { fetchMessagesForRoom } from "./src/services/messages.js";
+import { sendEncryptedMessage } from "./src/services/messages.js";
+import { getAccessToken } from "./src/services/auth.js";
 
 const COLORS = {
   bg: "#080B12",
@@ -467,6 +471,7 @@ export default function GhostChat() {
       return {};
     }
   });
+  const [typingByRoom, setTypingByRoom] = useState({});
 
   // Socket.IO integration
   const { connected, peerId, emit: socketEmit, on: socketOn } = useSocket(profile);
@@ -550,11 +555,142 @@ export default function GhostChat() {
     return groups.find((item) => normalizePeerCode(item.code) === key) || null;
   };
 
+  const upsertEncryptedMessage = async (payload, roomCodeOverride = null, roomIdOverride = null) => {
+    const roomCode = payload?.roomCode || roomCodeOverride || "";
+    const room = getRoomByCodeValue(roomCode);
+    const localRoomId = room?.id || roomIdOverride || payload?.roomId;
+    if (!localRoomId) return;
+
+    const sentAt = Number(payload?.sentAt || Date.now());
+    const autoShredAt = payload?.autoShredAt || null;
+    let text = payload?.bodyCiphertext || "";
+    let resolvedAttachment = payload?.attachment || null;
+
+    if (payload?.bodyFormat === "E2EE_V1") {
+      try {
+        const keyMaterial = await ensureOwnKeyMaterial();
+        const roomMembers = roomMemberKeysRef.current[normalizePeerCode(roomCode)] || {};
+        const senderInfo = roomMembers[payload?.fromPeerId];
+        if (!senderInfo?.signingPublicKey || !senderInfo?.encryptionPublicKey) {
+          throw new Error("Missing sender public key metadata");
+        }
+
+        const signingKey = await importSigningPublicKey(senderInfo.signingPublicKey);
+        const valid = await verifyMessagePayloadSignature(
+          signingKey,
+          {
+            clientMsgId: payload?.clientMsgId,
+            sentAt: payload?.sentAt,
+            bodyCiphertext: payload?.bodyCiphertext,
+            bodyIv: payload?.bodyIv,
+            bodyFormat: payload?.bodyFormat,
+            wrappedKeys: payload?.wrappedKeys,
+          },
+          payload?.signature
+        );
+
+        if (!valid) {
+          throw new Error("Invalid message signature");
+        }
+
+        const envelope = await decryptEnvelopeFromPayload({
+          payload,
+          myPeerId: peerId,
+          myPrivateEncryptionKey: keyMaterial.encryptionKeyPair.privateKey,
+          senderEncryptionPublicKey: senderInfo.encryptionPublicKey,
+        });
+
+        text = typeof envelope?.text === "string" ? envelope.text : "";
+        resolvedAttachment = envelope?.attachment || null;
+      } catch (error) {
+        console.error("[E2EE] Failed to decrypt incoming message", error);
+        text = "[Unable to decrypt message]";
+        resolvedAttachment = null;
+      }
+    }
+
+    const message = {
+      id: payload?.clientMsgId || payload?.msgId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      from: payload?.fromPeerId === peerId ? "me" : "them",
+      text,
+      time: new Date(sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      read: payload?.fromPeerId === peerId,
+      expiresAt: autoShredAt,
+      attachment: resolvedAttachment,
+    };
+
+    setMessagesByRoom((prev) => {
+      const current = prev[localRoomId] || [];
+      return {
+        ...prev,
+        [localRoomId]: appendMessageUnique(current, message),
+      };
+    });
+
+    return message;
+  };
+
+  const hydrateRoomHistory = async (roomCode, roomId) => {
+    if (!roomCode || !roomId) return;
+    try {
+      const recentMessages = await fetchMessagesForRoom(roomCode, 50);
+      for (const payload of recentMessages) {
+        // Hydrate without disturbing the existing UI state shape.
+        // eslint-disable-next-line no-await-in-loop
+        await upsertEncryptedMessage(payload, roomCode, roomId);
+      }
+    } catch (error) {
+      console.warn("[ROOM] Failed to load room history", error);
+    }
+  };
+
   useEffect(() => {
     ensureOwnKeyMaterial().catch((error) => {
       console.error("[E2EE] Failed to initialize key material", error);
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const rooms = await fetchRooms();
+        if (cancelled) return;
+
+        rooms.forEach((room) => {
+          registerRoom(
+            {
+              id: room.id,
+              name: room.name,
+              code: room.code,
+              online: Boolean(room.online),
+              unread: 0,
+              last: room.last || "Tunnel available",
+              time: room.time || "now",
+              isGroup: room.kind === "group",
+              createdAt: room.createdAt,
+              expiresAt: room.expiresAt,
+            },
+            room.code,
+            { expiryMinutes: Math.max(1, Math.round((Number(room.expiresAt) - Number(room.createdAt)) / 60000) || 10) }
+          );
+        });
+      } catch (error) {
+        console.warn("[ROOM] Failed to fetch backend rooms", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeChat?.code || !activeChat?.id) return undefined;
+    hydrateRoomHistory(activeChat.code, activeChat.id);
+    return undefined;
+  }, [activeChat?.code, activeChat?.id]);
 
   useEffect(() => {
     if (!document.getElementById("gc-fonts")) {
@@ -587,6 +723,11 @@ export default function GhostChat() {
             }
             return prev;
           });
+          if (Array.isArray(payload?.recentMessages) && payload.recentMessages.length > 0) {
+            payload.recentMessages.forEach((messagePayload) => {
+              upsertEncryptedMessage(messagePayload, roomCode, payload.roomId);
+            });
+          }
         })
       );
 
@@ -594,76 +735,8 @@ export default function GhostChat() {
       unsubscribers.push(
         socketOn('msg.new', async (payload) => {
           console.log('[SOCKET.RECEIVED] msg.new', payload);
-          const { fromPeerId, bodyCiphertext, sentAt, autoShredAt, attachment, roomCode } = payload;
-          if (fromPeerId === peerId) return; // Skip own messages
-
-          const room = getRoomByCodeValue(roomCode);
-          const localRoomId = room?.id;
-          if (!localRoomId) return;
-
-          let text = bodyCiphertext;
-          let resolvedAttachment = attachment || null;
-
-          if (payload?.bodyFormat === "E2EE_V1") {
-            try {
-              const keyMaterial = await ensureOwnKeyMaterial();
-              const roomMembers = roomMemberKeysRef.current[normalizePeerCode(roomCode)] || {};
-              const senderInfo = roomMembers[fromPeerId];
-              if (!senderInfo?.signingPublicKey || !senderInfo?.encryptionPublicKey) {
-                throw new Error("Missing sender public key metadata");
-              }
-
-              const signingKey = await importSigningPublicKey(senderInfo.signingPublicKey);
-              const valid = await verifyMessagePayloadSignature(
-                signingKey,
-                {
-                  clientMsgId: payload.clientMsgId,
-                  sentAt: payload.sentAt,
-                  bodyCiphertext: payload.bodyCiphertext,
-                  bodyIv: payload.bodyIv,
-                  bodyFormat: payload.bodyFormat,
-                  wrappedKeys: payload.wrappedKeys,
-                },
-                payload.signature
-              );
-
-              if (!valid) {
-                throw new Error("Invalid message signature");
-              }
-
-              const envelope = await decryptEnvelopeFromPayload({
-                payload,
-                myPeerId: peerId,
-                myPrivateEncryptionKey: keyMaterial.encryptionKeyPair.privateKey,
-                senderEncryptionPublicKey: senderInfo.encryptionPublicKey,
-              });
-
-              text = typeof envelope?.text === "string" ? envelope.text : "";
-              resolvedAttachment = envelope?.attachment || null;
-            } catch (error) {
-              console.error("[E2EE] Failed to decrypt incoming message", error);
-              text = "[Unable to decrypt message]";
-              resolvedAttachment = null;
-            }
-          }
-
-          const message = {
-            id: payload.clientMsgId || payload.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            from: "them",
-            text,
-            time: new Date(sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            read: true,
-            expiresAt: autoShredAt,
-            attachment: resolvedAttachment,
-          };
-
-          setMessagesByRoom(prev => {
-            const current = prev[localRoomId] || [];
-            return {
-              ...prev,
-              [localRoomId]: appendMessageUnique(current, message),
-            };
-          });
+          if (payload?.fromPeerId === peerId) return;
+          upsertEncryptedMessage(payload, payload?.roomCode, payload?.roomId);
         })
       );
 
@@ -671,7 +744,17 @@ export default function GhostChat() {
       unsubscribers.push(
         socketOn('typing.update', (payload) => {
           console.log('[SOCKET.RECEIVED] typing.update', payload);
-          // TODO: Update UI for typing indicator from other peers
+          if (payload?.peerId === peerId) return;
+          const roomKey = payload?.roomId || normalizePeerCode(payload?.roomCode);
+          if (!roomKey) return;
+          setTypingByRoom((prev) => {
+            if (payload?.isTyping) {
+              return { ...prev, [roomKey]: true };
+            }
+            const next = { ...prev };
+            delete next[roomKey];
+            return next;
+          });
         })
       );
 
@@ -708,6 +791,37 @@ export default function GhostChat() {
             removeRoomMember(activeChat.code, payload.peerId);
           }
           // Update room members
+        })
+      );
+
+      unsubscribers.push(
+        socketOn('room.expired', (payload) => {
+          console.log('[SOCKET.RECEIVED] room.expired', payload);
+          const roomKey = payload?.roomId || normalizePeerCode(payload?.roomCode);
+          if (!roomKey) return;
+
+          setTypingByRoom((prev) => {
+            const next = { ...prev };
+            delete next[roomKey];
+            return next;
+          });
+
+          setRoomDirectory((prev) => {
+            const next = { ...prev };
+            Object.entries(next).forEach(([key, room]) => {
+              if (room?.id === payload?.roomId || normalizePeerCode(room?.code) === normalizePeerCode(payload?.roomCode)) {
+                next[key] = { ...room, online: false, expired: true };
+              }
+            });
+            return next;
+          });
+
+          setChats((prev) => prev.map((room) => (room?.id === payload?.roomId ? { ...room, online: false, expired: true } : room)));
+          setGroups((prev) => prev.map((room) => (room?.id === payload?.roomId ? { ...room, online: false, expired: true } : room)));
+
+          if (activeChat?.id === payload?.roomId || normalizePeerCode(activeChat?.code) === normalizePeerCode(payload?.roomCode)) {
+            setActiveChat(null);
+          }
         })
       );
     }
@@ -858,8 +972,9 @@ export default function GhostChat() {
     setChats((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
     setGroups((prev) => prev.map((item) => (item.id === roomId ? { ...item, last: lastText, time: "now" } : item)));
 
-    socketEmit('msg.send', {
+    const payload = {
       roomId: activeRoom.id,
+      roomCode: activeRoom.code,
       clientMsgId,
       bodyCiphertext: encryptedBody.bodyCiphertext,
       bodyIv: encryptedBody.bodyIv,
@@ -870,7 +985,18 @@ export default function GhostChat() {
       attachment: null,
       signature,
       signingPublicKey: keyMaterial.signingPublicKey,
-    });
+    };
+
+    if (connected) {
+      socketEmit('msg.send', payload);
+      return;
+    }
+
+    try {
+      await sendEncryptedMessage(activeRoom.code, payload, getAccessToken());
+    } catch (error) {
+      console.error('[MSG] REST fallback failed', error);
+    }
   };
 
   const pruneRoomMessages = (roomId) => {
@@ -920,7 +1046,33 @@ export default function GhostChat() {
   const createGroupRoom = (groupLike) => {
     return new Promise((resolve, reject) => {
       if (!connected) {
-        reject(new Error("Socket not connected"));
+        createRoomApi(
+          {
+            kind: 'group',
+            ttlMinutes: groupLike?.expiryMinutes || 60,
+            name: groupLike?.name || 'Ghost Group',
+          },
+          getAccessToken()
+        )
+          .then((room) => {
+            if (!room?.code) {
+              throw new Error('Failed to generate room code');
+            }
+
+            const createdRoom = registerRoom(
+              {
+                ...groupLike,
+                ...room,
+                isGroup: true,
+                last: groupLike?.last || 'Group tunnel created',
+              },
+              room.code,
+              { expiryMinutes: groupLike?.expiryMinutes || 60 }
+            );
+
+            resolve(createdRoom);
+          })
+          .catch(reject);
         return;
       }
 
@@ -971,6 +1123,15 @@ export default function GhostChat() {
         onSendMessage={sendMessage}
         onPruneMessages={pruneRoomMessages}
         onMessageSent={() => setActivity((prev) => ({ ...prev, messages: prev.messages + 1 }))}
+        remoteTyping={Boolean(typingByRoom[activeChat.id])}
+        onTypingChange={(roomId, isTyping) => {
+          if (!connected || !activeChat?.code) return;
+          socketEmit('typing.set', {
+            roomId,
+            roomCode: activeChat.code,
+            isTyping,
+          });
+        }}
       />
     );
   } else if (tab === "chats") {
@@ -981,9 +1142,34 @@ export default function GhostChat() {
     content =
       <CodeGenScreen
         onGenerateRoom={async (expiry) => {
-          if (!connected) {
-            throw new Error("Socket not connected");
-          }
+            if (!connected) {
+              const room = await createRoomApi(
+                {
+                  kind: 'direct',
+                  ttlMinutes: expiry,
+                  name: '🧠 Ghost Link',
+                },
+                getAccessToken()
+              );
+
+              const createdRoom = registerRoom(
+                {
+                  id: room.id,
+                  name: room.name || '🧠 Ghost Link',
+                  unread: 0,
+                  time: 'now',
+                  last: `Secure key active ${expiry}m`,
+                  online: true,
+                  code: room.code,
+                  createdAt: room.createdAt,
+                  expiresAt: room.expiresAt,
+                },
+                room.code,
+                { expiryMinutes: expiry }
+              );
+
+              return createdRoom?.code || room.code;
+            }
 
           return new Promise((resolve, reject) => {
             socketEmit(
