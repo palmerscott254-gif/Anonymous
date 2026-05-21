@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSocket } from "./src/hooks/useSocket";
 import { Avatar, NavBar, LockIcon, ShieldIcon } from "./src/components/UI.jsx";
 import { ChatsScreen } from "./src/components/ChatsScreen.jsx";
@@ -13,6 +13,16 @@ import { sendEncryptedMessage } from "./src/services/messages.js";
 import { getAccessToken } from "./src/services/auth.js";
 import { fetchHealth } from "./src/services/health.js";
 import { generatePeerCode as generatePeerCodeRequest } from "./src/services/keys.js";
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_PROFILE,
+  DEFAULT_ACTIVITY,
+  STORAGE_KEYS,
+} from "./src/utils/constants.js";
+
+const CHATS = [];
+const GROUPS = [];
+const SEARCH_RESULTS = [];
 
 const COLORS = {
   bg: "#080B12",
@@ -449,10 +459,12 @@ export default function GhostChat() {
   }, []);
 
   // Socket.IO integration
-  const { connected, peerId, emit: socketEmit, on: socketOn } = useSocket(profile);
+  const { connected, peerId, sessionId, emit: socketEmit, on: socketOn } = useSocket(profile);
   const ownKeyMaterialRef = useRef(null);
   const ownKeyMaterialPromiseRef = useRef(null);
   const roomMemberKeysRef = useRef({});
+  const joinedRoomSignatureRef = useRef(null);
+  const roomJoinInFlightRef = useRef(null);
 
   const ensureOwnKeyMaterial = async () => {
     if (ownKeyMaterialRef.current) {
@@ -520,6 +532,105 @@ export default function GhostChat() {
     const { [memberPeerId]: _removed, ...rest } = roomMembers;
     roomMemberKeysRef.current[normalizedCode] = rest;
   };
+
+  const waitForSocketEvent = useCallback(
+    (eventName, predicate, timeoutMs = 6000) => {
+      if (!socketOn) {
+        return Promise.reject(new Error(`Socket listener unavailable for ${eventName}`));
+      }
+
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const unsubscribe = socketOn(eventName, (payload) => {
+          if (typeof predicate === 'function' && !predicate(payload)) {
+            return;
+          }
+
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeoutId);
+          unsubscribe?.();
+          resolve(payload);
+        });
+
+        const timeoutId = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          unsubscribe?.();
+          reject(new Error(`Timed out waiting for ${eventName}`));
+        }, timeoutMs);
+      });
+    },
+    [socketOn]
+  );
+
+  const joinActiveRoom = useCallback(
+    async (roomLike, reason = 'manual') => {
+      if (!connected || !roomLike?.code || !roomLike?.id) {
+        return null;
+      }
+
+      const roomCode = displayPeerCode(roomLike.code);
+      const joinSignature = `${sessionId || 'socket'}:${normalizePeerCode(roomCode)}`;
+      if (joinedRoomSignatureRef.current === joinSignature) {
+        return null;
+      }
+
+      if (roomJoinInFlightRef.current?.joinSignature === joinSignature) {
+        return roomJoinInFlightRef.current.promise;
+      }
+
+      const joinPromise = (async () => {
+        const keyMaterial = await ensureOwnKeyMaterial();
+        const payload = {
+          roomCode,
+          identity: {
+            username: profile.username,
+            emoji: profile.emoji,
+            keys: {
+              encryptionPublicKey: keyMaterial.encryptionPublicKey,
+              signingPublicKey: keyMaterial.signingPublicKey,
+            },
+          },
+        };
+
+        console.log('[SOCKET.OUTBOUND] room.join', { reason, roomCode, roomId: roomLike.id });
+        const joinResponsePromise = waitForSocketEvent(
+          'room.joined',
+          (response) => normalizePeerCode(response?.roomCode) === normalizePeerCode(roomCode),
+          6000
+        );
+
+        socketEmit('room.join', payload);
+
+        const joinResponse = await joinResponsePromise;
+
+        joinedRoomSignatureRef.current = joinSignature;
+        console.log('[SOCKET.CONFIRMED] room.joined', {
+          reason,
+          roomCode,
+          roomId: joinResponse?.roomId,
+          memberCount: Array.isArray(joinResponse?.members) ? joinResponse.members.length : 0,
+        });
+
+        return joinResponse;
+      })();
+
+      roomJoinInFlightRef.current = {
+        joinSignature,
+        promise: joinPromise,
+      };
+
+      try {
+        return await joinPromise;
+      } finally {
+        if (roomJoinInFlightRef.current?.joinSignature === joinSignature) {
+          roomJoinInFlightRef.current = null;
+        }
+      }
+    },
+    [connected, ensureOwnKeyMaterial, profile.emoji, profile.username, sessionId, socketEmit, waitForSocketEvent]
+  );
 
   const getRoomByCodeValue = (roomCode) => {
     const key = normalizePeerCode(roomCode);
@@ -626,6 +737,25 @@ export default function GhostChat() {
   }, []);
 
   useEffect(() => {
+    joinedRoomSignatureRef.current = null;
+    roomJoinInFlightRef.current = null;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!connected || !activeChat?.code || !activeChat?.id) return undefined;
+
+    joinActiveRoom(activeChat, 'auto-reconnect').catch((error) => {
+      console.error('[SOCKET] Room rejoin failed', {
+        roomCode: activeChat?.code,
+        roomId: activeChat?.id,
+        error,
+      });
+    });
+
+    return undefined;
+  }, [activeChat?.code, activeChat?.id, connected, joinActiveRoom]);
+
+  useEffect(() => {
     let cancelled = false;
 
     (async () => {
@@ -689,6 +819,7 @@ export default function GhostChat() {
           console.log('[SOCKET.RECEIVED] room.joined', payload);
           const { roomCode } = payload;
           const key = normalizePeerCode(roomCode);
+          joinedRoomSignatureRef.current = `${sessionId || 'socket'}:${key}`;
           setRoomMembersForCode(roomCode, payload.members || []);
           // Update room online status and member count
           setRoomDirectory(prev => {
@@ -712,6 +843,24 @@ export default function GhostChat() {
           console.log('[SOCKET.RECEIVED] msg.new', payload);
           if (payload?.fromPeerId === peerId) return;
           upsertEncryptedMessage(payload, payload?.roomCode, payload?.roomId);
+        })
+      );
+
+      unsubscribers.push(
+        socketOn('msg.ack', (payload) => {
+          console.log('[SOCKET.RECEIVED] msg.ack', payload);
+        })
+      );
+
+      unsubscribers.push(
+        socketOn('error', (payload) => {
+          console.error('[SOCKET.RECEIVED] error', payload);
+        })
+      );
+
+      unsubscribers.push(
+        socketOn('presence.update', (payload) => {
+          console.log('[SOCKET.RECEIVED] presence.update', payload);
         })
       );
 
@@ -963,8 +1112,26 @@ export default function GhostChat() {
     };
 
     if (connected) {
-      socketEmit('msg.send', payload);
-      return;
+      try {
+        console.log('[SOCKET.OUTBOUND] msg.send', {
+          roomCode: activeRoom.code,
+          roomId: activeRoom.id,
+          clientMsgId,
+        });
+        const messageAckPromise = waitForSocketEvent(
+          'msg.ack',
+          (response) => response?.clientMsgId === clientMsgId,
+          6000
+        );
+
+        socketEmit('msg.send', payload);
+
+        await messageAckPromise;
+
+        return;
+      } catch (error) {
+        console.warn('[MSG] Socket send did not confirm; falling back to HTTP', error);
+      }
     }
 
     try {
@@ -994,26 +1161,13 @@ export default function GhostChat() {
     setActiveChat(room);
     setTab("chats");
 
-    // Emit room.join to socket if connected
-    if (connected && room?.code) {
-      ensureOwnKeyMaterial()
-        .then((keyMaterial) => {
-          socketEmit('room.join', {
-            roomCode: room.code,
-            identity: {
-              username: profile.username,
-              emoji: profile.emoji,
-              keys: {
-                encryptionPublicKey: keyMaterial.encryptionPublicKey,
-                signingPublicKey: keyMaterial.signingPublicKey,
-              },
-            },
-          });
-        })
-        .catch((error) => {
-          console.error('[E2EE] Unable to join room without key material', error);
-        });
-    }
+    joinActiveRoom(room, 'open-room').catch((error) => {
+      console.error('[SOCKET] Room join failed', {
+        roomCode: room?.code,
+        roomId: room?.id,
+        error,
+      });
+    });
 
     return { ok: true };
   };

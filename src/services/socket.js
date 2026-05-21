@@ -44,6 +44,10 @@ function emitIdentity(socket, identity, token) {
 function attachDiagnostics(socket, baseUrl) {
   updateSocketStatus({ baseUrl, state: 'connecting', lastError: null, lastDisconnectReason: null });
 
+  socket.onAny((eventName, ...args) => {
+    console.debug(`[SOCKET.INBOUND] ${eventName}`, args?.[0]);
+  });
+
   socket.on('connect', () => {
     console.log(`[SOCKET] Connected to ${baseUrl} with id:`, socket.id);
     updateSocketStatus({
@@ -140,6 +144,8 @@ export function socketEmit(eventName, payload, ack) {
     console.warn(`[SOCKET] Cannot emit ${eventName}: socket not connected`, getSocketStatus());
     return;
   }
+
+  console.debug(`[SOCKET.OUTBOUND] ${eventName}`, payload);
   
   if (typeof ack === 'function') {
     socketInstance.emit(eventName, payload, ack);

@@ -148,6 +148,12 @@ export function setupSocketHandlers(io, deps) {
     const sessionId = socket.id;
     const meta = socketMeta(socket);
 
+    socket.onAny((eventName, payload) => {
+      if (['session.hello', 'room.generate_code', 'room:generate', 'room.join', 'room:join', 'msg.send', 'msg:send', 'typing.set', 'typing:set', 'msg.read', 'msg:read', 'room.leave', 'room:leave'].includes(eventName)) {
+        console.log(`[SOCKET.INBOUND] ${sessionId} ${eventName}`, payload);
+      }
+    });
+
     registerAliases(
       socket,
       ['session.hello'],
@@ -528,6 +534,7 @@ export function setupSocketHandlers(io, deps) {
     );
 
     socket.on('disconnect', () => {
+      console.log(`[SOCKET.DISCONNECT] ${sessionId}`);
       const session = getUserSession(sessionId);
       if (session?.roomCode) {
         const room = getRoomByCode(session.roomCode);
