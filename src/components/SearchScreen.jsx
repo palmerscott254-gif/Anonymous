@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { COLORS, FONT, SANS } from "../utils/constants.js";
 import { normalizePeerCode, displayPeerCode, getEmoji, addAlpha } from "../utils/helpers.js";
 import { Avatar } from "./UI.jsx";
+import { redeemPeerCode } from "../services/keys.js";
 
 const SEARCH_RESULTS = [];
 
@@ -11,7 +12,7 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
   const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState("");
   const normalizedCode = normalizePeerCode(code);
-  const canSearch = normalizedCode.length === 6;
+  const canSearch = normalizedCode.length === 6 || normalizedCode.length === 8;
 
   const search = () => {
     setScanning(true);
@@ -47,7 +48,28 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
 
       const filtered = pool.filter((item) => normalizePeerCode(item.code) === normalizedCode);
       if (filtered.length === 0) {
-        setStatus("No active tunnel found for that code");
+        redeemPeerCode(normalizedCode)
+          .then((response) => {
+            const tunnel = {
+              id: `peer-${normalizedCode}`,
+              name: `🔐 Peer ${displayPeerCode(normalizedCode)}`,
+              online: true,
+              unread: 0,
+              last: "Tunnel available",
+              time: "now",
+              code: displayPeerCode(normalizedCode),
+              expiresAt: response?.expires_at ? Date.parse(response.expires_at) : undefined,
+            };
+            const result = onJoinRoom(tunnel);
+            setStatus(result?.ok ? "Joining secure tunnel..." : result?.error || "Unable to join tunnel");
+          })
+          .catch(() => {
+            setStatus("No active tunnel found for that code");
+          })
+          .finally(() => {
+            setScanning(false);
+          });
+        return;
       } else {
         setStatus("Tunnel found — tap CONNECT to join");
       }

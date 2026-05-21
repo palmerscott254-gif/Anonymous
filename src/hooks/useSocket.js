@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { io } from 'socket.io-client';
 import { fetchGuestSession, getAccessToken, setAccessToken } from '../services/auth.js';
-
-const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+import { initSocket, updateSocketIdentity } from '../services/socket.js';
 
 export function useSocket(identity) {
   const [connected, setConnected] = useState(false);
@@ -43,31 +41,13 @@ export function useSocket(identity) {
       if (disposed) return;
 
       if (!socket) {
-        socket = io(SOCKET_SERVER_URL, {
-          reconnection: true,
-          reconnectionDelay: 1000,
-          reconnectionDelayMax: 5000,
-          reconnectionAttempts: 5,
-          auth: token ? { token } : undefined,
-        });
+        socket = initSocket({ identity, token });
         socketRef.current = socket;
 
         socket.on('connect', () => {
           console.log('[SOCKET] Connected:', socket.id);
           setConnected(true);
           setSessionId(socket.id);
-
-          if (identity) {
-            socket.emit('session.hello', {
-              deviceId: socket.id,
-              token,
-              identity: {
-                username: identity.username || 'Ghost',
-                emoji: identity.emoji || '👤',
-                keys: identity.keys || undefined,
-              },
-            });
-          }
         });
 
         socket.on('session.ready', (payload) => {
@@ -79,8 +59,8 @@ export function useSocket(identity) {
         });
 
         socket.on('connect_error', (err) => {
-          console.error('[SOCKET] Connection error:', err);
-          setError(err.message);
+          console.error('[SOCKET] Connection error:', err?.message || err);
+          setError(err?.message || 'Unable to connect to the backend');
         });
 
         socket.on('error', (payload) => {
@@ -99,17 +79,7 @@ export function useSocket(identity) {
         socket.connect();
       }
 
-      if (identity && socket?.connected) {
-        socket.emit('session.hello', {
-          deviceId: socket.id,
-          token,
-          identity: {
-            username: identity.username || 'Ghost',
-            emoji: identity.emoji || '👤',
-            keys: identity.keys || undefined,
-          },
-        });
-      }
+      updateSocketIdentity(identity, token);
     };
 
     connectSocket();
@@ -124,19 +94,6 @@ export function useSocket(identity) {
       }
     };
   }, [identity]);
-
-  useEffect(() => {
-    if (socketRef.current?.connected && identity) {
-      socketRef.current.emit('session.hello', {
-        deviceId: socketRef.current.id,
-        token: getAccessToken(),
-        identity: {
-          username: identity.username || 'Ghost',
-          emoji: identity.emoji || '👤',
-        },
-      });
-    }
-  }, [identity?.username, identity?.emoji]);
 
   const emit = (eventName, payload, ack) => {
     if (socketRef.current?.connected) {
@@ -158,7 +115,7 @@ export function useSocket(identity) {
 
     return () => {
       listenersRef.current[eventName] = listenersRef.current[eventName].filter(
-        cb => cb !== callback
+        (cb) => cb !== callback
       );
     };
   };
@@ -166,7 +123,7 @@ export function useSocket(identity) {
   const off = (eventName, callback) => {
     if (listenersRef.current[eventName]) {
       listenersRef.current[eventName] = listenersRef.current[eventName].filter(
-        cb => cb !== callback
+        (cb) => cb !== callback
       );
     }
   };

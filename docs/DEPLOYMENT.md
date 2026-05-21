@@ -10,6 +10,11 @@ Minimum required in production:
 - `JWT_SECRET`
 - `DATABASE_URL`
 
+Frontend production endpoints for GhostChat:
+
+- `VITE_API_URL=https://anonymous-193w.onrender.com`
+- `VITE_SOCKET_URL=https://anonymous-193w.onrender.com`
+
 ## Docker
 
 Build image:
@@ -42,3 +47,11 @@ docker run --rm -p 3001:3001 --env-file .env ghostchat:latest
 - Managed PostgreSQL.
 - Sticky sessions or Socket.IO adapter when scaling to multiple instances.
 - Log aggregation and alerting on `/health/ready` failures.
+
+## Render Deployment
+
+The deployed backend for the current GhostChat release is:
+
+- `https://anonymous-193w.onrender.com`
+
+Use the Render service URL for both REST and Socket.IO traffic. The frontend now resolves that endpoint automatically from `.env.production` and will fall back to it in production builds if the explicit variables are missing.

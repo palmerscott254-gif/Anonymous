@@ -9,11 +9,11 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
   const [hovered, setHovered] = useState(null);
   const [tunnelError, setTunnelError] = useState("");
   const normalizedCode = normalizePeerCode(peerCode);
-  const canOpenTunnel = normalizedCode.length === 6;
+  const canOpenTunnel = normalizedCode.length === 6 || normalizedCode.length === 8;
 
   const openNewTunnel = () => {
-    if (normalizedCode.length !== 6) {
-      setTunnelError("Peer code is required (format: XX-0000)");
+    if (normalizedCode.length !== 6 && normalizedCode.length !== 8) {
+      setTunnelError("Peer code is required");
       return;
     }
     const resolvedCode = displayPeerCode(normalizedCode);

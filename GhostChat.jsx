@@ -11,6 +11,8 @@ import { listRooms as fetchRooms, createRoom as createRoomApi } from "./src/serv
 import { fetchMessagesForRoom } from "./src/services/messages.js";
 import { sendEncryptedMessage } from "./src/services/messages.js";
 import { getAccessToken } from "./src/services/auth.js";
+import { fetchHealth } from "./src/services/health.js";
+import { generatePeerCode as generatePeerCodeRequest } from "./src/services/keys.js";
 
 const COLORS = {
   bg: "#080B12",
@@ -32,60 +34,6 @@ const COLORS = {
 
 const FONT = "'Space Mono', monospace";
 const SANS = "'DM Sans', sans-serif";
-
-const CHATS = [];
-
-const GROUPS = [];
-
-const MESSAGES = [];
-
-const SEARCH_RESULTS = [];
-
-const DEFAULT_SETTINGS = {
-  endToEndEncryption: true,
-  websocketTunnels: true,
-  messageShredding: true,
-  stealthMode: false,
-  androidOptimization: true,
-};
-
-const DEFAULT_PROFILE = {
-  username: "Ghost",
-  emoji: "🦅",
-  peerCode: generatePeerCode(),
-};
-
-const DEFAULT_ACTIVITY = {
-  messages: 0,
-};
-
-const STORAGE_KEYS = {
-  chats: "gc.chats",
-  groups: "gc.groups",
-  rooms: "gc.rooms",
-  messages: "gc.messages",
-};
-
-function addAlpha(hex, alphaHex) {
-  return `${hex}${alphaHex}`;
-}
-
-const EMOJI_REGEX = createSafeRegex("\\p{Emoji}", "u", /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
-const LEADING_EMOJI_REGEX = createSafeRegex("^\\p{Emoji}\\s*", "u", /^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\s*/u);
-
-function createSafeRegex(pattern, flags, fallback) {
-  try {
-    return new RegExp(pattern, flags);
-  } catch {
-    return fallback;
-  }
-}
-
-function getEmoji(name = "") {
-  const match = name.match(EMOJI_REGEX);
-  return match ? match[0] : "👤";
-}
-
 function stripLeadingEmoji(name = "") {
   return name.replace(LEADING_EMOJI_REGEX, "").trim();
 }
@@ -105,14 +53,16 @@ function generatePeerCode() {
 }
 
 function normalizePeerCode(value = "") {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
 }
 
 function displayPeerCode(value = "") {
   const normalized = normalizePeerCode(value);
   if (!normalized) return "";
   if (normalized.length <= 2) return normalized;
-  return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
+  if (normalized.length === 8) return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+  if (normalized.length === 6) return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
+  return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
 }
 
 function formatFileSize(bytes = 0) {
@@ -472,6 +422,31 @@ export default function GhostChat() {
     }
   });
   const [typingByRoom, setTypingByRoom] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const probeBackend = async () => {
+      try {
+        const health = await fetchHealth();
+        if (cancelled) return;
+        console.info('[HEALTH] Backend reachable:', {
+          status: health?.status || 'ok',
+          databaseConfigured: Boolean(health?.databaseConfigured),
+          env: health?.env,
+        });
+      } catch (error) {
+        if (cancelled) return;
+        console.error('[HEALTH] Backend unreachable:', error?.message || error);
+      }
+    };
+
+    probeBackend();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Socket.IO integration
   const { connected, peerId, emit: socketEmit, on: socketOn } = useSocket(profile);
@@ -1142,69 +1117,24 @@ export default function GhostChat() {
     content =
       <CodeGenScreen
         onGenerateRoom={async (expiry) => {
-            if (!connected) {
-              const room = await createRoomApi(
-                {
-                  kind: 'direct',
-                  ttlMinutes: expiry,
-                  name: '🧠 Ghost Link',
-                },
-                getAccessToken()
-              );
+          const response = await generatePeerCodeRequest(expiry);
+          const createdRoom = registerRoom(
+            {
+              id: `peer-${response.code}`,
+              name: '🧠 Ghost Link',
+              unread: 0,
+              time: 'now',
+              last: `Secure key active ${expiry}m`,
+              online: true,
+              code: response.code,
+              createdAt: Date.now(),
+              expiresAt: response.expires_at ? Date.parse(response.expires_at) : Date.now() + expiry * 60 * 1000,
+            },
+            response.code,
+            { expiryMinutes: expiry }
+          );
 
-              const createdRoom = registerRoom(
-                {
-                  id: room.id,
-                  name: room.name || '🧠 Ghost Link',
-                  unread: 0,
-                  time: 'now',
-                  last: `Secure key active ${expiry}m`,
-                  online: true,
-                  code: room.code,
-                  createdAt: room.createdAt,
-                  expiresAt: room.expiresAt,
-                },
-                room.code,
-                { expiryMinutes: expiry }
-              );
-
-              return createdRoom?.code || room.code;
-            }
-
-          return new Promise((resolve, reject) => {
-            socketEmit(
-              'room:generate',
-              {
-                kind: 'direct',
-                ttlMinutes: expiry,
-                name: '🧠 Ghost Link',
-              },
-              (response) => {
-                if (!response?.ok || !response?.room?.code) {
-                  reject(new Error(response?.error || 'Failed to generate room code'));
-                  return;
-                }
-
-                const createdRoom = registerRoom(
-                  {
-                    id: response.room.id,
-                    name: response.room.name || '🧠 Ghost Link',
-                    unread: 0,
-                    time: 'now',
-                    last: `Secure key active ${expiry}m`,
-                    online: true,
-                    code: response.room.code,
-                    createdAt: response.room.createdAt,
-                    expiresAt: response.room.expiresAt,
-                  },
-                  response.room.code,
-                  { expiryMinutes: expiry }
-                );
-
-                resolve(createdRoom?.code || response.room.code);
-              }
-            );
-          });
+          return createdRoom?.code || response.code;
         }}
       />;
   } else if (tab === "groups") {

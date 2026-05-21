@@ -7,15 +7,24 @@ export function CodeGenScreen({ onGenerateRoom }) {
   const [generating, setGenerating] = useState(false);
   const [copyState, setCopyState] = useState("idle");
   const [expiry, setExpiry] = useState(10);
+  const [error, setError] = useState("");
 
-  const generateCode = async () => {
+  const handleGenerateCode = async () => {
     if (generating) return;
     setGenerating(true);
     setCopyState("idle");
+    setError("");
 
     try {
       const nextCode = await onGenerateRoom(expiry);
-      setCode(nextCode || null);
+      const displayCode = typeof nextCode === "string" ? nextCode : nextCode?.code;
+      setCode(displayCode || null);
+      if (!displayCode) {
+        throw new Error("Backend did not return a peer code");
+      }
+    } catch (nextError) {
+      setCode(null);
+      setError(nextError?.message || "Failed to generate peer code");
     } finally {
       setGenerating(false);
     }
@@ -105,6 +114,8 @@ export function CodeGenScreen({ onGenerateRoom }) {
         {!code && !generating && <div style={{ fontFamily: FONT, fontSize: 24, color: COLORS.textMuted }}>_ _ - _ _ _ _</div>}
       </div>
 
+      {error && <div style={{ marginTop: 12, fontFamily: FONT, fontSize: 11, color: COLORS.red }}>{error}</div>}
+
       <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: "12px 14px" }}>
         <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>EXPIRY DURATION</div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -136,14 +147,15 @@ export function CodeGenScreen({ onGenerateRoom }) {
 
       <button
         type="button"
-        onClick={generateCode}
+        onClick={handleGenerateCode}
+        disabled={generating}
         style={{
           width: "100%",
           marginTop: 12,
           padding: 13,
           borderRadius: 12,
           border: "none",
-          cursor: "pointer",
+          cursor: generating ? "not-allowed" : "pointer",
           fontFamily: FONT,
           fontSize: 13,
           fontWeight: 700,
@@ -158,13 +170,13 @@ export function CodeGenScreen({ onGenerateRoom }) {
       <button
         type="button"
         onClick={copyCode}
-        disabled={!code}
+        disabled={!code || generating}
         style={{
           width: "100%",
           marginTop: 8,
           padding: 12,
           borderRadius: 12,
-          cursor: code ? "pointer" : "not-allowed",
+          cursor: code && !generating ? "pointer" : "not-allowed",
           fontFamily: FONT,
           fontSize: 12,
           border: `1px solid ${copyState === "success" ? COLORS.accent : copyState === "error" ? COLORS.red : COLORS.border}`,

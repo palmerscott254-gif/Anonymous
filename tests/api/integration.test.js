@@ -48,6 +48,7 @@ function createMockDbPool() {
     roomMembers: [],
     messages: [],
     sessions: [],
+    peerCodes: [],
   };
 
   const nextUser = () => ({ id: randomUUID(), username: '', passwordHash: '', publicKey: null, createdAt: Date.now() });
@@ -198,6 +199,77 @@ function createMockDbPool() {
         return { rows: [{ id: message.id, clientMsgId: message.clientMsgId, sentAt: message.sentAt, autoShredAt: message.autoShredAt }], rowCount: 1 };
       }
 
+      if (text.includes('INSERT INTO peer_codes(')) {
+        const [creatorId, code, codeNormalized, expiresAt] = params;
+        let peerCode = state.peerCodes.find((item) => item.code === code) || null;
+        if (peerCode && peerCode.isUsed) {
+          peerCode = null;
+        }
+        if (peerCode && peerCode.expiresAt > Date.now() && !peerCode.isUsed) {
+          return { rows: [], rowCount: 0 };
+        }
+        if (!peerCode) {
+          peerCode = {
+            id: randomUUID(),
+            creatorId,
+            code,
+            codeNormalized,
+            expiresAt,
+            isUsed: false,
+            usedBy: null,
+            createdAt: Date.now(),
+            usedAt: null,
+          };
+          state.peerCodes.push(peerCode);
+        } else {
+          Object.assign(peerCode, { creatorId, code, codeNormalized, expiresAt, isUsed: false, usedBy: null, usedAt: null });
+        }
+        return {
+          rows: [{
+            id: peerCode.id,
+            creatorId: peerCode.creatorId,
+            code: peerCode.code,
+            codeNormalized: peerCode.codeNormalized,
+            expiresAt: peerCode.expiresAt,
+            isUsed: peerCode.isUsed,
+            usedBy: peerCode.usedBy,
+            createdAt: peerCode.createdAt,
+            usedAt: peerCode.usedAt,
+          }],
+          rowCount: 1,
+        };
+      }
+
+      if (text.includes('UPDATE peer_codes')) {
+        const [codeNormalized, usedBy] = params;
+        const peerCode = state.peerCodes.find((item) => item.codeNormalized === codeNormalized && !item.isUsed && item.expiresAt > Date.now()) || null;
+        if (!peerCode) {
+          return { rows: [], rowCount: 0 };
+        }
+        peerCode.isUsed = true;
+        peerCode.usedBy = usedBy;
+        peerCode.usedAt = Date.now();
+        return {
+          rows: [{
+            id: peerCode.id,
+            creatorId: peerCode.creatorId,
+            code: peerCode.code,
+            codeNormalized: peerCode.codeNormalized,
+            expiresAt: peerCode.expiresAt,
+            isUsed: peerCode.isUsed,
+            usedBy: peerCode.usedBy,
+            createdAt: peerCode.createdAt,
+            usedAt: peerCode.usedAt,
+          }],
+          rowCount: 1,
+        };
+      }
+
+      if (text.includes('DELETE FROM peer_codes')) {
+        state.peerCodes = state.peerCodes.filter((item) => item.expiresAt > Date.now() && !item.isUsed);
+        return { rows: [], rowCount: 1 };
+      }
+
       if (text.includes('FROM messages') && text.includes('WHERE room_id = $1')) {
         const [roomId, limit, offset] = params;
         const rows = state.messages
@@ -275,6 +347,40 @@ describe('integration flows', () => {
       .get('/session/me')
       .set('Authorization', `Bearer ${refreshResponse.body?.tokens?.accessToken}`)
       .expect(200);
+  });
+
+  it('generates and redeems one-time peer codes', async () => {
+    const dbPool = createMockDbPool();
+    const runtime = createGhostChatRuntime({ env: buildEnv(), dbPool });
+
+    const guest = await request(runtime.app).post('/auth/guest').send({ username: 'peer-tester' }).expect(200);
+    const token = guest.body?.tokens?.accessToken;
+
+    const generated = await request(runtime.app)
+      .post('/api/keys/generate/')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ expires_in_minutes: 10 })
+      .expect(201);
+
+    expect(generated.body?.code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    expect(generated.body?.expires_at).toBeTypeOf('string');
+    expect(dbPool.state.peerCodes).toHaveLength(1);
+    expect(dbPool.state.peerCodes[0]?.isUsed).toBe(false);
+
+    const redeemed = await request(runtime.app)
+      .post('/api/keys/redeem/')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code: generated.body.code })
+      .expect(200);
+
+    expect(redeemed.body?.ok).toBe(true);
+    expect(dbPool.state.peerCodes[0]?.isUsed).toBe(true);
+
+    await request(runtime.app)
+      .post('/api/keys/redeem/')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ code: generated.body.code })
+      .expect(404);
   });
 
   it('supports socket room creation, encrypted message send, and persistence', async () => {
