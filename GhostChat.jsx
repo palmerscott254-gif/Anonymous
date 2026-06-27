@@ -45,6 +45,13 @@ const COLORS = {
 const FONT = "'Space Mono', monospace";
 const SANS = "'DM Sans', sans-serif";
 const TAB_ORDER = ["chats", "search", "codegen", "groups", "profile"];
+const SWIPE_THRESHOLD = 48;
+
+function isInteractiveSwipeTarget(target) {
+  if (!target || typeof target.closest !== "function") return false;
+  return Boolean(target.closest("button, input, textarea, select, a, [contenteditable='true']"));
+}
+
 function stripLeadingEmoji(name = "") {
   return name.replace(LEADING_EMOJI_REGEX, "").trim();
 }
@@ -77,8 +84,7 @@ function displayPeerCode(value = "") {
 }
 
 function getTabFromSwipeDirection(deltaX) {
-  const threshold = 40;
-  if (Math.abs(deltaX) < threshold) return null;
+  if (Math.abs(deltaX) < SWIPE_THRESHOLD) return null;
   return deltaX < 0 ? 1 : -1;
 }
 
@@ -1038,14 +1044,19 @@ export default function GhostChat() {
   const handleTouchStart = (event) => {
     const touch = event.touches?.[0];
     if (!touch) return;
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+      blocked: isInteractiveSwipeTarget(event.target),
+    };
   };
 
   const handleTouchEnd = (event) => {
     const start = touchStartRef.current;
     touchStartRef.current = null;
     const touch = event.changedTouches?.[0];
-    if (!start || !touch) return;
+    if (!start || !touch || start.blocked) return;
 
     const deltaX = touch.clientX - start.x;
     const deltaY = touch.clientY - start.y;
@@ -1349,9 +1360,13 @@ export default function GhostChat() {
         position: "relative",
         overflow: "hidden",
         display: "flex",
+        touchAction: "pan-y",
       }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      onTouchCancel={() => {
+        touchStartRef.current = null;
+      }}
     >
       <style>
         {`html, body, #root { width: 100%; min-height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
