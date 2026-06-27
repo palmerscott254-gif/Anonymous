@@ -6,6 +6,7 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState(profile?.emoji || "🦅");
+  const peerCode = profile?.peerCode || profile?.roomCode || "--";
 
   const save = () => {
     onProfileSave({
@@ -95,7 +96,7 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
 
         <div style={{ marginTop: 10, fontFamily: SANS, fontSize: 18, fontWeight: 700, color: COLORS.text }}>{displayName}</div>
         <div style={{ marginTop: 4, fontFamily: FONT, fontSize: 11, color: COLORS.textMuted }}>
-          <span style={{ color: COLORS.accent }}>{profile?.peerCode || "--"}</span> • peer code
+          <span style={{ color: COLORS.accent }}>{peerCode}</span> • peer code
         </div>
 
         <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 14, paddingTop: 12, display: "flex", justifyContent: "space-around" }}>
@@ -179,6 +180,11 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
               SAVE CHANGES
             </button>
           </div>
+          {!profile?.peerCode && (
+            <div style={{ marginTop: 10, fontFamily: SANS, fontSize: 10, color: COLORS.textMuted }}>
+              Your peer code will appear after a tunnel or key has been generated.
+            </div>
+          )}
         </div>
       ) : (
         <button

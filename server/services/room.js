@@ -9,9 +9,12 @@ export function getRoomStorage() {
 }
 
 export function normalizeRoomCode(value = '') {
-  const normalized = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  const normalized = String(value).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
   if (!normalized) return '';
   if (normalized.length <= 2) return normalized;
+  if (normalized.length === 8) {
+    return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+  }
   return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
 }
 

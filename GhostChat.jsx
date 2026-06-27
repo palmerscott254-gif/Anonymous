@@ -44,6 +44,7 @@ const COLORS = {
 
 const FONT = "'Space Mono', monospace";
 const SANS = "'DM Sans', sans-serif";
+const TAB_ORDER = ["chats", "search", "codegen", "groups", "profile"];
 function stripLeadingEmoji(name = "") {
   return name.replace(LEADING_EMOJI_REGEX, "").trim();
 }
@@ -73,6 +74,12 @@ function displayPeerCode(value = "") {
   if (normalized.length === 8) return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
   if (normalized.length === 6) return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
   return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+}
+
+function getTabFromSwipeDirection(deltaX) {
+  const threshold = 40;
+  if (Math.abs(deltaX) < threshold) return null;
+  return deltaX < 0 ? 1 : -1;
 }
 
 function formatFileSize(bytes = 0) {
@@ -432,6 +439,7 @@ export default function GhostChat() {
     }
   });
   const [typingByRoom, setTypingByRoom] = useState({});
+  const touchStartRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -504,14 +512,7 @@ export default function GhostChat() {
     });
 
     roomMemberKeysRef.current[normalizedCode] = next;
-  };
 
-  const upsertRoomMember = (roomCode, member) => {
-    const normalizedCode = normalizePeerCode(roomCode);
-    if (!normalizedCode || !member?.peerId) return;
-    const encryptionPublicKey = member?.e2ee?.encryptionPublicKey;
-    const signingPublicKey = member?.e2ee?.signingPublicKey;
-    if (!encryptionPublicKey || !signingPublicKey) return;
 
     const roomMembers = roomMemberKeysRef.current[normalizedCode] || {};
     roomMemberKeysRef.current[normalizedCode] = {
@@ -1025,6 +1026,37 @@ export default function GhostChat() {
     return room;
   };
 
+  const goToAdjacentTab = useCallback((direction) => {
+    const currentIndex = TAB_ORDER.indexOf(tab);
+    if (currentIndex < 0) return;
+    const nextIndex = Math.min(TAB_ORDER.length - 1, Math.max(0, currentIndex + direction));
+    if (nextIndex !== currentIndex) {
+      setTab(TAB_ORDER[nextIndex]);
+    }
+  }, [tab]);
+
+  const handleTouchStart = (event) => {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
+  };
+
+  const handleTouchEnd = (event) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    const touch = event.changedTouches?.[0];
+    if (!start || !touch) return;
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    if (Math.abs(deltaY) > Math.abs(deltaX)) return;
+
+    const direction = getTabFromSwipeDirection(deltaX);
+    if (direction) {
+      goToAdjacentTab(direction);
+    }
+  };
+
   const sendMessage = async (roomId, text, autoShredSeconds = 0, attachment = null) => {
     if (!roomId || (!text?.trim() && !attachment)) return;
     if (!connected) {
@@ -1272,6 +1304,10 @@ export default function GhostChat() {
       <CodeGenScreen
         onGenerateRoom={async (expiry) => {
           const response = await generatePeerCodeRequest(expiry);
+          setProfile((prev) => ({
+            ...prev,
+            peerCode: displayPeerCode(response.code || prev?.peerCode || ""),
+          }));
           const createdRoom = registerRoom(
             {
               id: `peer-${response.code}`,
@@ -1314,6 +1350,8 @@ export default function GhostChat() {
         overflow: "hidden",
         display: "flex",
       }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
     >
       <style>
         {`html, body, #root { width: 100%; min-height: 100%; margin: 0; padding: 0; overflow-x: hidden; }
