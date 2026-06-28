@@ -7,6 +7,7 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
   DATABASE_URL: z.string().url().optional().or(z.literal('')),
+  REDIS_URL: z.string().url().optional().or(z.literal('')),
   CORS_ORIGIN: z.string().default(''),
   JWT_SECRET: z
     .preprocess((value) => {
@@ -68,6 +69,7 @@ export function getEnv() {
   cachedEnv = {
     ...parsed.data,
     DATABASE_URL: parsed.data.DATABASE_URL || '',
+    REDIS_URL: parsed.data.REDIS_URL || '',
     CORS_ORIGIN: parsed.data.CORS_ORIGIN || '',
   };
 

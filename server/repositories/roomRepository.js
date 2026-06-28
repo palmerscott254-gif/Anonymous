@@ -64,5 +64,13 @@ export function createRoomRepository({ dbPool }) {
       );
       return result.rows[0] || null;
     },
+
+    async pruneExpiredRooms() {
+      if (!dbPool) return 0;
+      const result = await dbPool.query(
+        `DELETE FROM rooms WHERE expires_at < NOW()`
+      );
+      return result.rowCount || 0;
+    },
   };
 }

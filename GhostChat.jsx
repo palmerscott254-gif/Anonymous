@@ -20,6 +20,23 @@ import {
   DEFAULT_ACTIVITY,
   STORAGE_KEYS,
 } from "./src/utils/constants.js";
+import {
+  generateKeyMaterial,
+  encryptEnvelopeForRecipients,
+  decryptEnvelopeFromPayload,
+} from "./src/services/crypto.js";
+import {
+  stripLeadingEmoji,
+  getNowHHMM,
+  generatePeerCode,
+  normalizePeerCode,
+  displayPeerCode,
+  formatFileSize,
+  appendMessageUnique,
+  isImageMimeType,
+  readFileAsDataUrl,
+  copyTextToClipboard,
+} from "./src/utils/helpers.js";
 
 const CHATS = [];
 const GROUPS = [];
@@ -63,304 +80,9 @@ function isInteractiveSwipeTarget(target) {
   return Boolean(target.closest("button, input, textarea, select, a, [contenteditable='true']"));
 }
 
-function stripLeadingEmoji(name = "") {
-  return name.replace(LEADING_EMOJI_REGEX, "").trim();
-}
-
-function getNowHHMM() {
-  const now = new Date();
-  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-}
-
-function generatePeerCode() {
-  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const digits = "23456789";
-  const first = letters[Math.floor(Math.random() * letters.length)];
-  const second = letters[Math.floor(Math.random() * letters.length)];
-  const tail = Array.from({ length: 4 }, () => digits[Math.floor(Math.random() * digits.length)]).join("");
-  return `${first}${second}-${tail}`;
-}
-
-function normalizePeerCode(value = "") {
-  return value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
-}
-
-function displayPeerCode(value = "") {
-  const normalized = normalizePeerCode(value);
-  if (!normalized) return "";
-  if (normalized.length <= 2) return normalized;
-  if (normalized.length === 8) return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
-  if (normalized.length === 6) return `${normalized.slice(0, 2)}-${normalized.slice(2)}`;
-  return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
-}
-
 function getTabFromSwipeDirection(deltaX) {
   if (Math.abs(deltaX) < SWIPE_THRESHOLD) return null;
   return deltaX < 0 ? 1 : -1;
-}
-
-function formatFileSize(bytes = 0) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const value = bytes / 1024 ** index;
-  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
-}
-
-function appendMessageUnique(items = [], nextMessage) {
-  if (!nextMessage?.id) return [...items, nextMessage];
-  if (items.some((item) => item.id === nextMessage.id)) return items;
-  return [...items, nextMessage];
-}
-
-function isImageMimeType(mime = "") {
-  return /^image\//i.test(mime);
-}
-
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function copyTextToClipboard(text) {
-  if (!text) return false;
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // fall back below
-  }
-
-  try {
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.setAttribute("readonly", "");
-    textArea.style.position = "fixed";
-    textArea.style.opacity = "0";
-    textArea.style.pointerEvents = "none";
-    textArea.style.left = "-9999px";
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    const copied = document.execCommand("copy");
-    document.body.removeChild(textArea);
-    return copied;
-  } catch {
-    return false;
-  }
-}
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-function bytesToBase64(bytes) {
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(base64Value = "") {
-  const normalized = String(base64Value || "").trim();
-  const binary = atob(normalized);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-function getCryptoSubtle() {
-  if (!window?.crypto?.subtle) {
-    throw new Error("WebCrypto not available");
-  }
-  return window.crypto.subtle;
-}
-
-function getRandomBytes(length) {
-  const bytes = new Uint8Array(length);
-  window.crypto.getRandomValues(bytes);
-  return bytes;
-}
-
-async function exportPublicKeyBase64(key) {
-  const subtle = getCryptoSubtle();
-  const spki = await subtle.exportKey("spki", key);
-  return bytesToBase64(new Uint8Array(spki));
-}
-
-async function importEncryptionPublicKey(base64Key) {
-  const subtle = getCryptoSubtle();
-  return subtle.importKey(
-    "spki",
-    base64ToBytes(base64Key),
-    { name: "ECDH", namedCurve: "P-256" },
-    false,
-    []
-  );
-}
-
-async function importSigningPublicKey(base64Key) {
-  const subtle = getCryptoSubtle();
-  return subtle.importKey(
-    "spki",
-    base64ToBytes(base64Key),
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["verify"]
-  );
-}
-
-async function generateKeyMaterial() {
-  const subtle = getCryptoSubtle();
-  const [encryptionKeyPair, signingKeyPair] = await Promise.all([
-    subtle.generateKey(
-      { name: "ECDH", namedCurve: "P-256" },
-      false,
-      ["deriveBits"]
-    ),
-    subtle.generateKey(
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["sign", "verify"]
-    ),
-  ]);
-
-  const [encryptionPublicKey, signingPublicKey] = await Promise.all([
-    exportPublicKeyBase64(encryptionKeyPair.publicKey),
-    exportPublicKeyBase64(signingKeyPair.publicKey),
-  ]);
-
-  return {
-    encryptionKeyPair,
-    signingKeyPair,
-    encryptionPublicKey,
-    signingPublicKey,
-  };
-}
-
-function buildSignedMessageBlob(payload) {
-  return JSON.stringify({
-    clientMsgId: String(payload.clientMsgId || ""),
-    sentAt: Number(payload.sentAt || 0),
-    bodyCiphertext: String(payload.bodyCiphertext || ""),
-    bodyIv: String(payload.bodyIv || ""),
-    bodyFormat: String(payload.bodyFormat || ""),
-    wrappedKeys: payload.wrappedKeys && typeof payload.wrappedKeys === "object" ? payload.wrappedKeys : {},
-  });
-}
-
-async function signMessagePayload(signingPrivateKey, payload) {
-  const subtle = getCryptoSubtle();
-  const signature = await subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    signingPrivateKey,
-    textEncoder.encode(buildSignedMessageBlob(payload))
-  );
-  return bytesToBase64(new Uint8Array(signature));
-}
-
-async function verifyMessagePayloadSignature(signingPublicKey, payload, signatureBase64) {
-  const subtle = getCryptoSubtle();
-  return subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
-    signingPublicKey,
-    base64ToBytes(signatureBase64),
-    textEncoder.encode(buildSignedMessageBlob(payload))
-  );
-}
-
-async function deriveWrapKey(sharedSecretBytes, saltBytes) {
-  const subtle = getCryptoSubtle();
-  const secretMaterial = await subtle.importKey("raw", sharedSecretBytes, "HKDF", false, ["deriveKey"]);
-  return subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: saltBytes,
-      info: textEncoder.encode("ghostchat-e2ee-wrap-v1"),
-    },
-    secretMaterial,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"]
-  );
-}
-
-async function encryptEnvelopeForRecipients({ envelope, senderPrivateEncryptionKey, recipients }) {
-  const subtle = getCryptoSubtle();
-  const contentKeyBytes = getRandomBytes(32);
-  const contentKey = await subtle.importKey("raw", contentKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
-  const bodyIvBytes = getRandomBytes(12);
-
-  const plaintext = textEncoder.encode(JSON.stringify(envelope));
-  const ciphertext = await subtle.encrypt({ name: "AES-GCM", iv: bodyIvBytes }, contentKey, plaintext);
-
-  const wrappedKeys = {};
-  for (const recipient of recipients) {
-    const recipientPublicKey = await importEncryptionPublicKey(recipient.encryptionPublicKey);
-    const sharedBits = await subtle.deriveBits(
-      { name: "ECDH", public: recipientPublicKey },
-      senderPrivateEncryptionKey,
-      256
-    );
-    const wrapSalt = getRandomBytes(16);
-    const wrapIv = getRandomBytes(12);
-    const wrapKey = await deriveWrapKey(new Uint8Array(sharedBits), wrapSalt);
-    const wrapped = await subtle.encrypt({ name: "AES-GCM", iv: wrapIv }, wrapKey, contentKeyBytes);
-
-    wrappedKeys[recipient.peerId] = {
-      iv: bytesToBase64(wrapIv),
-      salt: bytesToBase64(wrapSalt),
-      ciphertext: bytesToBase64(new Uint8Array(wrapped)),
-    };
-  }
-
-  return {
-    bodyCiphertext: bytesToBase64(new Uint8Array(ciphertext)),
-    bodyIv: bytesToBase64(bodyIvBytes),
-    wrappedKeys,
-  };
-}
-
-async function decryptEnvelopeFromPayload({ payload, myPeerId, myPrivateEncryptionKey, senderEncryptionPublicKey }) {
-  const subtle = getCryptoSubtle();
-  const wrapped = payload?.wrappedKeys?.[myPeerId];
-  if (!wrapped || !wrapped.ciphertext || !wrapped.iv || !wrapped.salt) {
-    throw new Error("Missing wrapped key for recipient");
-  }
-
-  const senderPublicKey = await importEncryptionPublicKey(senderEncryptionPublicKey);
-  const sharedBits = await subtle.deriveBits(
-    { name: "ECDH", public: senderPublicKey },
-    myPrivateEncryptionKey,
-    256
-  );
-
-  const wrapKey = await deriveWrapKey(new Uint8Array(sharedBits), base64ToBytes(wrapped.salt));
-  const contentKeyRaw = await subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(wrapped.iv) },
-    wrapKey,
-    base64ToBytes(wrapped.ciphertext)
-  );
-
-  const contentKey = await subtle.importKey("raw", contentKeyRaw, { name: "AES-GCM" }, false, ["decrypt"]);
-  const plaintext = await subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(payload.bodyIv) },
-    contentKey,
-    base64ToBytes(payload.bodyCiphertext)
-  );
-
-  return JSON.parse(textDecoder.decode(plaintext));
 }
 
 // Replaced inline UI component implementations with modular imports above

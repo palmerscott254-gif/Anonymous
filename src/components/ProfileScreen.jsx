@@ -8,6 +8,7 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
   const [selectedEmoji, setSelectedEmoji] = useState(profile?.emoji || "🦅");
   const [encryptionFingerprint, setEncryptionFingerprint] = useState("");
   const [signingFingerprint, setSigningFingerprint] = useState("");
+  const [showQR, setShowQR] = useState(false);
   const peerCode = profile?.peerCode || profile?.roomCode || "--";
 
   const save = () => {
@@ -298,6 +299,45 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
           <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>
             Use these fingerprints to verify the active device before sharing a peer code.
           </div>
+
+          {encryptionFingerprint && signingFingerprint && (
+            <div style={{ marginTop: 4, display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={() => setShowQR(!showQR)}
+                style={{
+                  width: "100%",
+                  background: COLORS.accentDim,
+                  border: `1px solid ${COLORS.accent}`,
+                  borderRadius: 10,
+                  color: COLORS.accent,
+                  fontFamily: FONT,
+                  fontSize: 10,
+                  padding: "8px 12px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                  outline: "none"
+                }}
+              >
+                📷 {showQR ? "HIDE VERIFICATION QR" : "SHOW VERIFICATION QR"}
+              </button>
+              {showQR && (
+                <div style={{ marginTop: 12, textAlign: "center", background: "#FFFFFF", padding: 12, borderRadius: 12, display: "inline-block" }}>
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&color=050810&data=${encodeURIComponent(`ghostchat:verify:${encryptionFingerprint}:${signingFingerprint}`)}`}
+                    alt="Key fingerprint QR code"
+                    style={{ width: 160, height: 160, display: "block" }}
+                  />
+                  <div style={{ fontFamily: FONT, fontSize: 8, color: "#050810", marginTop: 6, fontWeight: 700 }}>
+                    SCAN TO VERIFY DEVICE
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

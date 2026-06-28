@@ -152,12 +152,21 @@ export async function encryptEnvelopeForRecipients({ envelope, senderPrivateEncr
   const plaintext = textEncoder.encode(JSON.stringify(envelope));
   const ciphertext = await subtle.encrypt({ name: "AES-GCM", iv: bodyIvBytes }, contentKey, plaintext);
 
+  // Generate ephemeral ECDH key pair for Perfect Forward Secrecy (PFS)
+  const ephemeralKeyPair = await subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    false,
+    ["deriveBits"]
+  );
+  const ephemeralPublicKeyBase64 = await exportPublicKeyBase64(ephemeralKeyPair.publicKey);
+
   const wrappedKeys = {};
   for (const recipient of recipients) {
     const recipientPublicKey = await importEncryptionPublicKey(recipient.encryptionPublicKey);
+    // Derive shared secret using the ephemeral private key and recipient's static public key
     const sharedBits = await subtle.deriveBits(
       { name: "ECDH", public: recipientPublicKey },
-      senderPrivateEncryptionKey,
+      ephemeralKeyPair.privateKey,
       256
     );
     const wrapSalt = getRandomBytes(16);
@@ -169,6 +178,7 @@ export async function encryptEnvelopeForRecipients({ envelope, senderPrivateEncr
       iv: bytesToBase64(wrapIv),
       salt: bytesToBase64(wrapSalt),
       ciphertext: bytesToBase64(new Uint8Array(wrapped)),
+      ephemeralPublicKey: ephemeralPublicKeyBase64, // Included for receiver to perform PFS decryption
     };
   }
 
@@ -186,9 +196,13 @@ export async function decryptEnvelopeFromPayload({ payload, myPeerId, myPrivateE
     throw new Error("Missing wrapped key for recipient");
   }
 
-  const senderPublicKey = await importEncryptionPublicKey(senderEncryptionPublicKey);
+  // PFS support: if the payload contains an ephemeral public key, use it. Otherwise, fallback to static sender key.
+  const derivationPublicKey = wrapped.ephemeralPublicKey
+    ? await importEncryptionPublicKey(wrapped.ephemeralPublicKey)
+    : await importEncryptionPublicKey(senderEncryptionPublicKey);
+
   const sharedBits = await subtle.deriveBits(
-    { name: "ECDH", public: senderPublicKey },
+    { name: "ECDH", public: derivationPublicKey },
     myPrivateEncryptionKey,
     256
   );

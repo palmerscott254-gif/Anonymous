@@ -3,11 +3,13 @@ import { createServer } from 'node:http';
 import cors from 'cors';
 import helmet from 'helmet';
 import { Server } from 'socket.io';
+import { createClient } from 'redis';
+import { createAdapter } from '@socket.io/redis-adapter';
 import { getAllowedOrigins } from './config/env.js';
 import { setupHealthRoutes } from './routes/health.js';
 import { setupSocketHandlers } from './sockets/handlers.js';
 import { enforceHttpRateLimit } from './services/rateLimit.js';
-import { getRoomStorage } from './services/room.js';
+import { getRoomStorage, cleanupExpiredRooms } from './services/room.js';
 import { createRoomRoutes } from './http/roomRoutes.js';
 import { createMessageRoutes } from './http/messageRoutes.js';
 import { createSessionRoutes } from './http/sessionRoutes.js';
@@ -85,6 +87,20 @@ export function createGhostChatRuntime({ env, dbPool }) {
     },
   });
 
+  if (env.REDIS_URL) {
+    const pubClient = createClient({ url: env.REDIS_URL });
+    const subClient = pubClient.duplicate();
+
+    Promise.all([pubClient.connect(), subClient.connect()])
+      .then(() => {
+        io.adapter(createAdapter(pubClient, subClient));
+        console.info('[REDIS] Socket.IO adapter successfully attached to Redis cluster');
+      })
+      .catch((err) => {
+        console.error('[REDIS] Error connecting Redis clients, using fallback adapter:', err.message);
+      });
+  }
+
   app.set('trust proxy', 1);
   app.use(
     helmet({
@@ -119,6 +135,22 @@ export function createGhostChatRuntime({ env, dbPool }) {
     roomRepository,
     messageRepository,
   });
+
+  // Periodically prune expired rooms (every 1 minute)
+  const pruneInterval = setInterval(async () => {
+    try {
+      cleanupExpiredRooms();
+      if (roomRepository?.pruneExpiredRooms) {
+        await roomRepository.pruneExpiredRooms();
+      }
+    } catch (err) {
+      console.error('[CLEANUP] Background room pruning failed:', err.message);
+    }
+  }, 60 * 1000);
+  
+  if (typeof pruneInterval.unref === 'function') {
+    pruneInterval.unref();
+  }
 
   return {
     app,
