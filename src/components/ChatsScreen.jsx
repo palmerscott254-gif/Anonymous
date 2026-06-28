@@ -61,14 +61,16 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
           type="button"
           onClick={() => setShowNew(true)}
           style={{
-            background: COLORS.accentDim,
-            border: `1px solid ${addAlpha(COLORS.accent, "40")}`,
+            background: "rgba(0, 255, 178, 0.12)",
+            border: "none",
             borderRadius: 20,
-            padding: "6px 12px",
+            padding: "8px 16px",
             color: COLORS.accent,
             fontFamily: FONT,
             fontSize: 10,
             cursor: "pointer",
+            outline: "none",
+            boxShadow: "0 2px 10px rgba(0, 255, 178, 0.1)",
           }}
         >
           + NEW
@@ -77,7 +79,7 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
 
       <div style={{ padding: "0 12px" }}>
         {chats.length === 0 && (
-          <div style={{ padding: "10px 12px", borderRadius: 12, background: COLORS.card, border: `1px solid ${COLORS.border}`, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>
+          <div style={{ padding: "16px 20px", borderRadius: 16, background: "rgba(255,255,255,0.02)", fontFamily: SANS, fontSize: 12, color: COLORS.textMuted, textAlign: "center", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)" }}>
             No chats yet. Tap <span style={{ color: COLORS.accent, fontFamily: FONT }}>+ NEW</span> to open your first tunnel.
           </div>
         )}
@@ -96,10 +98,12 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
               display: "flex",
               alignItems: "center",
               gap: 12,
-              padding: "10px 12px",
-              borderRadius: 14,
+              padding: "12px 16px",
+              borderRadius: 16,
               cursor: "pointer",
-              background: hovered === c.id ? COLORS.card : "transparent",
+              background: hovered === c.id ? "rgba(255, 255, 255, 0.03)" : "transparent",
+              boxShadow: hovered === c.id ? "0 8px 30px rgba(0, 0, 0, 0.4)" : "none",
+              transition: "all 0.2s ease",
             }}
           >
             <Avatar name={c.name} size={42} online={c.online} />
@@ -143,10 +147,12 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
               display: "flex",
               alignItems: "center",
               gap: 12,
-              padding: "10px 12px",
-              borderRadius: 14,
+              padding: "12px 16px",
+              borderRadius: 16,
               cursor: "pointer",
-              background: hovered === g.id ? COLORS.card : "transparent",
+              background: hovered === g.id ? "rgba(255, 255, 255, 0.03)" : "transparent",
+              boxShadow: hovered === g.id ? "0 8px 30px rgba(0, 0, 0, 0.4)" : "none",
+              transition: "all 0.2s ease",
             }}
             onMouseEnter={() => setHovered(g.id)}
             onMouseLeave={() => setHovered(null)}
@@ -161,12 +167,12 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
                 height: 42,
                 borderRadius: "50%",
                 background: COLORS.purpleDim,
-                border: `1.5px solid ${addAlpha(COLORS.purple, "40")}`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 18,
                 flexShrink: 0,
+                boxShadow: "0 4px 15px rgba(0, 0, 0, 0.4)",
               }}
             >
               {getEmoji(g.name)}
@@ -204,25 +210,27 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
           style={{
             position: "absolute",
             inset: 0,
-            background: "rgba(8,11,18,0.96)",
+            background: "rgba(8, 11, 18, 0.85)",
+            backdropFilter: "blur(30px)",
             zIndex: 50,
             display: "flex",
             flexDirection: "column",
-            padding: "24px 20px",
-            gap: 16,
+            padding: "32px 24px",
+            gap: 20,
+            boxShadow: "0 20px 80px rgba(0, 0, 0, 0.7)",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", justifySpace: "space-between", justifyContent: "space-between" }}>
             <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: COLORS.text }}>
               NEW <span style={{ color: COLORS.accent }}>TUNNEL</span>
             </div>
-            <button type="button" onClick={() => setShowNew(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, fontSize: 20, cursor: "pointer" }}>
+            <button type="button" onClick={() => setShowNew(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, fontSize: 22, cursor: "pointer", outline: "none" }}>
               ✕
             </button>
           </div>
 
           <div>
-            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 6 }}>PEER CODE (required)</div>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 8 }}>PEER CODE (required)</div>
             <input
               value={peerCode}
               onChange={(e) => {
@@ -232,16 +240,17 @@ export function ChatsScreen({ chats, groups, onOpen, onRegisterRoom }) {
               placeholder="XX-0000"
               style={{
                 width: "100%",
-                background: COLORS.card,
-                border: `1px solid ${addAlpha(COLORS.accent, "40")}`,
-                borderRadius: 12,
-                padding: "10px 14px",
+                background: "rgba(255, 255, 255, 0.03)",
+                border: "none",
+                borderRadius: 16,
+                padding: "14px 18px",
                 fontFamily: FONT,
                 letterSpacing: 3,
-                fontSize: 14,
+                fontSize: 16,
                 color: COLORS.accent,
-                outlineColor: COLORS.accent,
+                outline: "none",
                 textTransform: "uppercase",
+                boxShadow: "inset 0 2px 8px rgba(0, 0, 0, 0.3)",
               }}
             />
             {tunnelError && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.red }}>{tunnelError}</div>}

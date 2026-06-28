@@ -29,14 +29,16 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
           type="button"
           onClick={() => setShowCreate((v) => !v)}
           style={{
-            background: COLORS.purpleDim,
-            border: `1px solid ${addAlpha(COLORS.purple, "40")}`,
+            background: "rgba(168, 85, 247, 0.12)",
+            border: "none",
             color: COLORS.purple,
             fontFamily: FONT,
             fontSize: 10,
             borderRadius: 20,
-            padding: "6px 12px",
+            padding: "8px 16px",
             cursor: "pointer",
+            outline: "none",
+            boxShadow: "0 2px 10px rgba(168, 85, 247, 0.1)",
           }}
         >
           + CREATE
@@ -44,11 +46,11 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
       </div>
 
       {showCreate && (
-        <div style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${addAlpha(COLORS.purple, "30")}`, padding: 16, marginTop: 12, marginBottom: 14 }}>
-          <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.purple, letterSpacing: 1, marginBottom: 8 }}>NEW GROUP</div>
+        <div style={{ background: "rgba(255,255,255,0.02)", borderRadius: 20, padding: 20, marginTop: 14, marginBottom: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.4)" }}>
+          <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.purple, letterSpacing: 1, marginBottom: 12 }}>NEW GROUP</div>
           <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, letterSpacing: 1, marginBottom: 8 }}>PICK AVATAR</div>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
             {EMOJI_OPTIONS.groups.map((emoji) => (
               <button
                 key={emoji}
@@ -60,8 +62,10 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
                   borderRadius: 10,
                   fontSize: 20,
                   cursor: "pointer",
-                  border: `1.5px solid ${selectedEmoji === emoji ? COLORS.purple : COLORS.border}`,
-                  background: selectedEmoji === emoji ? COLORS.purpleDim : COLORS.card,
+                  border: "none",
+                  background: selectedEmoji === emoji ? "rgba(168, 85, 247, 0.2)" : "rgba(255,255,255,0.03)",
+                  boxShadow: selectedEmoji === emoji ? `0 0 12px ${addAlpha(COLORS.purple, "30")}` : "none",
+                  outline: "none",
                 }}
               >
                 {emoji}
@@ -76,7 +80,19 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
               if (createError) setCreateError("");
             }}
             placeholder={`${selectedEmoji} Group name...`}
-            style={{ width: "100%", background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "9px 12px", color: COLORS.text, fontFamily: SANS, fontSize: 13, outline: "none", marginBottom: 10 }}
+            style={{
+              width: "100%",
+              background: "rgba(255, 255, 255, 0.03)",
+              border: "none",
+              borderRadius: 12,
+              padding: "11px 14px",
+              color: COLORS.text,
+              fontFamily: SANS,
+              fontSize: 13,
+              outline: "none",
+              marginBottom: 12,
+              boxShadow: "inset 0 1px 4px rgba(0, 0, 0, 0.3)",
+            }}
           />
 
           {createError ? (
@@ -127,8 +143,10 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
               color: "#fff",
               fontFamily: FONT,
               fontSize: 12,
-              borderRadius: 10,
-              padding: 10,
+              borderRadius: 12,
+              padding: 12,
+              outline: "none",
+              boxShadow: `0 4px 15px ${addAlpha(COLORS.purple, "30")}`,
             }}
           >
             CREATE SECURE GROUP
@@ -137,20 +155,21 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
       )}
 
       {latestGroupCode && (
-        <div style={{ marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontFamily: FONT, fontSize: 10, color: COLORS.purple, background: COLORS.card, border: `1px solid ${addAlpha(COLORS.purple, "30")}`, borderRadius: 12, padding: "8px 10px" }}>
+        <div style={{ marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, fontFamily: FONT, fontSize: 10, color: COLORS.purple, background: "rgba(255,255,255,0.02)", borderRadius: 16, padding: "10px 14px", boxShadow: "0 4px 15px rgba(0,0,0,0.2)" }}>
           <span>Invite code: {latestGroupCode}</span>
           <button
             type="button"
             onClick={() => copyInviteCode(latestGroupCode, latestGroupCode)}
             style={{
-              border: `1px solid ${addAlpha(COLORS.purple, "40")}`,
+              border: "none",
               borderRadius: 999,
-              background: copyState[latestGroupCode] === "success" ? COLORS.purpleDim : COLORS.surface,
+              background: copyState[latestGroupCode] === "success" ? "rgba(168, 85, 247, 0.2)" : "rgba(255,255,255,0.05)",
               color: copyState[latestGroupCode] === "success" ? COLORS.purple : COLORS.textMuted,
               fontFamily: FONT,
               fontSize: 9,
-              padding: "5px 8px",
+              padding: "6px 12px",
               cursor: "pointer",
+              outline: "none",
             }}
           >
             {copyState[latestGroupCode] === "success" ? "COPIED" : "COPY"}
@@ -158,70 +177,75 @@ export function GroupsScreen({ groups, onCreateGroupRoom, onOpenGroupRoom }) {
         </div>
       )}
 
-      {groups.map((group) => (
-        <div
-          key={group.id}
-          role="button"
-          tabIndex={0}
-          onClick={() => onOpenGroupRoom(group)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onOpenGroupRoom(group);
-          }}
-          style={{ background: COLORS.card, borderRadius: 16, border: `1px solid ${COLORS.border}`, padding: 14, marginBottom: 8, cursor: "pointer" }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                width: 46,
-                height: 46,
-                borderRadius: 14,
-                background: COLORS.purpleDim,
-                border: `1.5px solid ${addAlpha(COLORS.purple, "40")}`,
-                fontSize: 24,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              {group.name?.match(/[\u{1F300}-\u{1FAFF}]/u)?.[0] || "👥"}
-            </div>
-
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{group.name}</div>
-              <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>{group.members} members • encrypted</div>
-              <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.purple }}>{group.code}</span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    copyInviteCode(group.code, group.id);
-                  }}
-                  style={{
-                    border: `1px solid ${addAlpha(COLORS.purple, "35")}`,
-                    borderRadius: 999,
-                    background: copyState[group.id] === "success" ? COLORS.purpleDim : COLORS.surface,
-                    color: copyState[group.id] === "success" ? COLORS.purple : COLORS.textMuted,
-                    fontFamily: FONT,
-                    fontSize: 9,
-                    padding: "4px 7px",
-                    cursor: "pointer",
-                  }}
-                >
-                  {copyState[group.id] === "success" ? "INVITE COPIED" : "COPY INVITE"}
-                </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {groups.map((group) => (
+          <div
+            key={group.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpenGroupRoom(group)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onOpenGroupRoom(group);
+            }}
+            style={{ background: "rgba(255,255,255,0.02)", borderRadius: 20, padding: 16, cursor: "pointer", boxShadow: "0 8px 30px rgba(0, 0, 0, 0.3)" }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: "50%",
+                  background: COLORS.purpleDim,
+                  fontSize: 22,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  boxShadow: "0 4px 15px rgba(0, 0, 0, 0.4)",
+                }}
+              >
+                {group.name?.match(/[\u{1F300}-\u{1FAFF}]/u)?.[0] || "👥"}
               </div>
+
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{group.name}</div>
+                <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>{group.members} members • encrypted</div>
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 10, color: COLORS.purple, fontWeight: 700 }}>{group.code}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyInviteCode(group.code, group.id);
+                    }}
+                    style={{
+                      border: "none",
+                      borderRadius: 999,
+                      background: copyState[group.id] === "success" ? "rgba(168, 85, 247, 0.2)" : "rgba(255, 255, 255, 0.05)",
+                      color: copyState[group.id] === "success" ? COLORS.purple : COLORS.textMuted,
+                      fontFamily: FONT,
+                      fontSize: 9,
+                      padding: "5px 10px",
+                      cursor: "pointer",
+                      outline: "none",
+                    }}
+                  >
+                    {copyState[group.id] === "success" ? "INVITE COPIED" : "COPY INVITE"}
+                  </button>
+                </div>
+              </div>
+
+              {group.unread > 0 && (
+                <span style={{ background: COLORS.purple, color: "#fff", borderRadius: 10, padding: "2px 7px", fontFamily: FONT, fontSize: 10 }}>{group.unread}</span>
+              )}
             </div>
 
-            {group.unread > 0 && (
-              <span style={{ background: COLORS.purple, color: "#fff", borderRadius: 10, padding: "2px 7px", fontFamily: FONT, fontSize: 10 }}>{group.unread}</span>
-            )}
+            <div style={{ marginTop: 12, paddingUp: 8, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted, opacity: 0.8 }}>
+              {group.last}
+            </div>
           </div>
-
-          <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 10, paddingTop: 8, fontFamily: SANS, fontSize: 12, color: COLORS.textMuted }}>{group.last}</div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

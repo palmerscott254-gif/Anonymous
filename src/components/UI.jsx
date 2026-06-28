@@ -29,7 +29,7 @@ export function NavBar({ tab, onTab }) {
   ];
 
   return (
-    <div style={{ display: "flex", background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, padding: "6px 0 10px" }}>
+    <div style={{ display: "flex", background: "rgba(13, 17, 23, 0.75)", backdropFilter: "blur(30px)", padding: "10px 0 14px", boxShadow: "0 -10px 50px rgba(0, 0, 0, 0.6)" }}>
       {items.map((item) => {
         const active = item.id === tab;
         return (
@@ -45,13 +45,14 @@ export function NavBar({ tab, onTab }) {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              gap: 2,
+              gap: 4,
               cursor: "pointer",
+              outline: "none",
             }}
           >
-            <span style={{ fontSize: 18, filter: active ? "none" : "grayscale(1)", opacity: active ? 1 : 0.5 }}>{item.icon}</span>
-            <span style={{ fontFamily: FONT, fontSize: 9, letterSpacing: 0.5, color: active ? COLORS.accent : COLORS.textMuted }}>{item.label}</span>
-            <span style={{ width: 16, height: 2, borderRadius: 999, background: active ? COLORS.accent : "transparent" }} />
+            <span style={{ fontSize: 18, filter: active ? "none" : "grayscale(1)", opacity: active ? 1 : 0.4, transition: "all 0.2s ease" }}>{item.icon}</span>
+            <span style={{ fontFamily: FONT, fontSize: 9, letterSpacing: 0.5, color: active ? COLORS.accent : COLORS.textMuted, opacity: active ? 1 : 0.6, transition: "all 0.2s ease" }}>{item.label}</span>
+            <span style={{ width: 12, height: 2, borderRadius: 999, background: active ? COLORS.accent : "transparent", marginTop: 2, boxShadow: active ? `0 0 10px ${COLORS.accent}` : "none", transition: "all 0.2s ease" }} />
           </button>
         );
       })}
@@ -69,15 +70,14 @@ export function Avatar({ name, size = 42, online }) {
     return (
       <span
         style={{
-          width: 10,
-          height: 10,
+          width: 9,
+          height: 9,
           borderRadius: "50%",
           position: "absolute",
           bottom: 0,
           right: 0,
           background: online ? COLORS.accent : COLORS.textMuted,
-          boxShadow: online ? `0 0 6px ${COLORS.accent}` : "none",
-          border: `2px solid ${COLORS.bg}`,
+          boxShadow: online ? `0 0 8px ${COLORS.accent}` : "none",
         }}
       />
     );
@@ -90,12 +90,12 @@ export function Avatar({ name, size = 42, online }) {
           width: size,
           height: size,
           borderRadius: "50%",
-          background: `linear-gradient(135deg, ${COLORS.card}, ${COLORS.border})`,
-          border: `1.5px solid ${COLORS.border}`,
+          background: `linear-gradient(135deg, ${COLORS.surface}, #161C24)`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontSize: size * 0.45,
+          boxShadow: "0 4px 15px rgba(0, 0, 0, 0.4)",
         }}
       >
         {getEmoji(name)}

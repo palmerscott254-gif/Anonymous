@@ -96,24 +96,25 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
 
       {status && <div style={{ marginTop: 6, fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>{status}</div>}
 
-      <div style={{ marginTop: 14, background: COLORS.card, borderRadius: 14, padding: "12px 14px", border: `1px solid ${addAlpha(COLORS.accent, "30")}` }}>
-        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 6 }}>PEER CODE</div>
+      <div style={{ marginTop: 14, background: "rgba(255, 255, 255, 0.02)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 30px rgba(0, 0, 0, 0.3)" }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 8 }}>PEER CODE</div>
         <input
           value={code}
           onChange={(e) => setCode(displayPeerCode(e.target.value))}
           placeholder="XX-0000"
           style={{
             width: "100%",
-            background: COLORS.surface,
-            border: `1px solid ${addAlpha(COLORS.accent, "30")}`,
-            borderRadius: 10,
-            padding: "9px 12px",
+            background: "rgba(255, 255, 255, 0.03)",
+            border: "none",
+            borderRadius: 12,
+            padding: "11px 14px",
             color: COLORS.accent,
             fontFamily: FONT,
             fontSize: 13,
             letterSpacing: 2,
             textTransform: "uppercase",
             outline: "none",
+            boxShadow: "inset 0 1px 4px rgba(0, 0, 0, 0.3)",
           }}
         />
       </div>
@@ -126,13 +127,15 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
           width: "100%",
           marginTop: 12,
           border: "none",
-          cursor: "pointer",
-          background: canSearch && !scanning ? `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)` : COLORS.card,
+          cursor: canSearch && !scanning ? "pointer" : "not-allowed",
+          background: canSearch && !scanning ? `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)` : "rgba(255, 255, 255, 0.03)",
           color: canSearch && !scanning ? COLORS.bg : COLORS.textMuted,
           fontFamily: FONT,
           fontSize: 13,
           borderRadius: 12,
           padding: "12px 13px",
+          outline: "none",
+          boxShadow: canSearch && !scanning ? `0 4px 20px ${COLORS.accent}30` : "none",
         }}
       >
         🔍 SEARCH
@@ -146,8 +149,7 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
               style={{
                 height: 10,
                 borderRadius: 999,
-                background: COLORS.card,
-                border: `1px solid ${COLORS.border}`,
+                background: "rgba(255, 255, 255, 0.02)",
                 animation: "bounce 0.9s infinite",
                 animationDelay: `${index * 0.2}s`,
               }}
@@ -159,7 +161,7 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
       {!scanning && results.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
           {results.map((r) => (
-            <div key={r.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+            <div key={r.id} style={{ background: "rgba(255, 255, 255, 0.02)", borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", gap: 10, boxShadow: "0 8px 30px rgba(0, 0, 0, 0.3)" }}>
               <Avatar name={r.name} size={40} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: COLORS.text }}>{r.name}</div>
@@ -170,14 +172,15 @@ export function SearchScreen({ roomDirectory, onJoinRoom }) {
                 type="button"
                 onClick={() => onJoinRoom(r.chat)}
                 style={{
-                  background: COLORS.accentDim,
-                  border: `1px solid ${addAlpha(COLORS.accent, "50")}`,
+                  background: "rgba(0, 255, 178, 0.15)",
+                  border: "none",
                   fontFamily: FONT,
                   fontSize: 10,
                   color: COLORS.accent,
                   borderRadius: 10,
-                  padding: "7px 10px",
+                  padding: "8px 14px",
                   cursor: "pointer",
+                  outline: "none",
                 }}
               >
                 CONNECT

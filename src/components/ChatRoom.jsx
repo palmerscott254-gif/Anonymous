@@ -105,12 +105,14 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           display: "flex",
           alignItems: "center",
           gap: 10,
-          padding: "10px 16px",
-          borderBottom: `1px solid ${COLORS.border}`,
-          background: COLORS.surface,
+          padding: "14px 20px",
+          background: "rgba(13, 17, 23, 0.75)",
+          backdropFilter: "blur(30px)",
+          boxShadow: "0 10px 40px rgba(0, 0, 0, 0.4)",
+          zIndex: 10,
         }}
       >
-        <button type="button" onClick={onBack} style={{ color: COLORS.accent, fontSize: 20, background: "none", border: "none", cursor: "pointer" }}>
+        <button type="button" onClick={onBack} style={{ color: COLORS.accent, fontSize: 20, background: "none", border: "none", cursor: "pointer", outline: "none" }}>
           ←
         </button>
         <Avatar name={chat.name} size={36} online={chat.online} />
@@ -127,30 +129,29 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
         </div>
       </div>
 
-      <div style={{ flex: 1, overflowY: "auto", padding: 0, display: "flex", flexDirection: "column", gap: 0 }}>
-        <div style={{ alignSelf: "center", marginTop: 10, marginBottom: 8, fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, background: COLORS.card, borderRadius: 8, padding: "3px 10px" }}>
-          {tunnelEnabled ? `${encryptionEnabled ? "🔒" : "⚠️"} ${encryptionEnabled ? "Secure" : "Unencrypted"} tunnel established` : "🌐 Tunnel disabled in settings"}
+      <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ alignSelf: "center", marginTop: 4, marginBottom: 4, fontFamily: FONT, fontSize: 9, color: COLORS.accent, letterSpacing: 0.5, opacity: 0.8 }}>
+          {tunnelEnabled ? `${encryptionEnabled ? "⚡" : "⚠️"} ${encryptionEnabled ? "SECURE TUNNEL" : "UNENCRYPTED TUNNEL"} ACTIVE` : "TUNNEL INACTIVE"}
         </div>
 
         {messages.map((m) => (
-          <div key={m.id} style={{ display: "flex", justifyContent: m.from === "me" ? "flex-end" : "flex-start", padding: "0 10px" }}>
-            <div style={{ maxWidth: "72%", background: "transparent", border: "none", padding: "4px 8px" }}>
+          <div key={m.id} style={{ display: "flex", justifyContent: m.from === "me" ? "flex-end" : "flex-start" }}>
+            <div style={{ maxWidth: "75%", background: m.from === "me" ? "rgba(0, 255, 178, 0.06)" : "rgba(255, 255, 255, 0.02)", border: "none", padding: "12px 16px", borderRadius: 16, boxShadow: "0 8px 30px rgba(0,0,0,0.3)" }}>
               {m.replyTo ? (
-                <div style={{ marginBottom: 6, borderLeft: `2px solid ${COLORS.accent}`, paddingLeft: 8, color: COLORS.textMuted, fontFamily: SANS, fontSize: 11 }}>
+                <div style={{ marginBottom: 8, borderLeft: `2px solid ${addAlpha(COLORS.accent, "40")}`, paddingLeft: 8, color: COLORS.textMuted, fontFamily: SANS, fontSize: 11 }}>
                   <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.accent }}>REPLYING TO {m.replyTo.sender || "message"}</div>
                   <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.replyTo.preview || "Reply"}</div>
                 </div>
               ) : null}
 
-              {m.text ? <div style={{ fontFamily: SANS, fontSize: 13, color: m.from === "me" ? "#39FF14" : "#00BFFF", lineHeight: 1.4 }}>{m.text}</div> : null}
+              {m.text ? <div style={{ fontFamily: SANS, fontSize: 13, color: COLORS.text, lineHeight: 1.5 }}>{m.text}</div> : null}
               {m.attachment ? (
                 <div
                   style={{
                     marginTop: m.text ? 8 : 0,
-                    borderRadius: 14,
+                    borderRadius: 16,
+                    background: "rgba(255, 255, 255, 0.02)",
                     overflow: "hidden",
-                    border: `1px solid ${m.from === "me" ? addAlpha(COLORS.accent, "35") : COLORS.border}`,
-                    background: m.from === "me" ? COLORS.bubbleSelf : COLORS.bubble,
                   }}
                 >
                   {isImageMimeType(m.attachment.mimeType) ? (
@@ -176,20 +177,21 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
                   </div>
                 </div>
               ) : null}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 2 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 6 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                   <button
                     type="button"
                     onClick={() => onReplyTargetChange?.({ msgId: m.serverMsgId || m.id, sender: m.fromUsername || m.sender || m.from, preview: m.text || m.attachment?.name || "Attachment" })}
                     style={{
-                      border: `1px solid ${COLORS.border}`,
-                      background: COLORS.surface,
+                      border: "none",
+                      background: "rgba(255, 255, 255, 0.04)",
                       color: COLORS.textMuted,
                       borderRadius: 999,
                       fontFamily: FONT,
                       fontSize: 9,
-                      padding: "3px 7px",
+                      padding: "4px 8px",
                       cursor: "pointer",
+                      outline: "none",
                     }}
                   >
                     ↩ Reply
@@ -200,14 +202,15 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
                       type="button"
                       onClick={() => onReactMessage?.(chat?.id, m.id, emoji)}
                       style={{
-                        border: `1px solid ${COLORS.border}`,
-                        background: COLORS.surface,
+                        border: "none",
+                        background: "rgba(255, 255, 255, 0.04)",
                         color: COLORS.textMuted,
                         borderRadius: 999,
                         fontFamily: FONT,
                         fontSize: 9,
-                        padding: "3px 6px",
+                        padding: "4px 8px",
                         cursor: "pointer",
+                        outline: "none",
                       }}
                     >
                       {emoji}
@@ -258,25 +261,30 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
 
       <div
         style={{
-          padding: "8px 12px 12px",
-          borderTop: `1px solid ${COLORS.border}`,
-          background: COLORS.surface,
+          padding: "12px 16px 20px",
+          background: "rgba(13, 17, 23, 0.85)",
+          backdropFilter: "blur(30px)",
+          boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.5)",
           display: "flex",
           alignItems: "center",
-          gap: 8,
+          gap: 12,
         }}
       >
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           style={{
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             borderRadius: "50%",
-            background: COLORS.card,
-            border: `1px solid ${COLORS.border}`,
+            background: "rgba(255, 255, 255, 0.03)",
+            border: "none",
             color: COLORS.textMuted,
             cursor: "pointer",
+            outline: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           📎
@@ -299,14 +307,15 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           disabled={!tunnelEnabled}
           style={{
             flex: 1,
-            background: COLORS.card,
-            border: `1px solid ${COLORS.border}`,
-            borderRadius: 20,
-            padding: "9px 14px",
+            background: "rgba(255, 255, 255, 0.03)",
+            border: "none",
+            borderRadius: 22,
+            padding: "11px 18px",
             fontFamily: SANS,
             fontSize: 13,
             color: COLORS.text,
             outline: "none",
+            boxShadow: "inset 0 1px 4px rgba(0, 0, 0, 0.3)",
           }}
         />
         <button
@@ -314,21 +323,26 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           onClick={send}
           disabled={!tunnelEnabled || (!msg.trim() && !pendingAttachment)}
           style={{
-            width: 36,
-            height: 36,
+            width: 40,
+            height: 40,
             borderRadius: "50%",
             border: "none",
             cursor: "pointer",
-            background: msg.trim() || pendingAttachment ? COLORS.accent : COLORS.card,
+            background: msg.trim() || pendingAttachment ? `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)` : "rgba(255, 255, 255, 0.02)",
             color: msg.trim() || pendingAttachment ? COLORS.bg : COLORS.textMuted,
+            outline: "none",
+            boxShadow: msg.trim() || pendingAttachment ? `0 4px 15px ${COLORS.accent}30` : "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
           ➤
         </button>
       </div>
       {replyTarget && (
-        <div style={{ padding: "0 12px 8px", background: COLORS.surface }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.card, padding: "8px 10px" }}>
+        <div style={{ padding: "0 16px 8px", background: "rgba(13, 17, 23, 0.85)", backdropFilter: "blur(30px)" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>Replying to {replyTarget.sender || "message"}</div>
               <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{replyTarget.preview || "Reply"}</div>
@@ -337,14 +351,15 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
               type="button"
               onClick={() => onReplyTargetChange?.(null)}
               style={{
-                border: `1px solid ${COLORS.border}`,
+                border: "none",
                 borderRadius: 999,
-                background: COLORS.surface,
+                background: "rgba(255, 255, 255, 0.05)",
                 color: COLORS.textMuted,
                 fontFamily: FONT,
                 fontSize: 10,
-                padding: "5px 8px",
+                padding: "6px 12px",
                 cursor: "pointer",
+                outline: "none",
               }}
             >
               CLEAR
@@ -353,11 +368,11 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
         </div>
       )}
       {(pendingAttachment || attachmentError) && (
-        <div style={{ padding: "0 12px 12px", background: COLORS.surface }}>
+        <div style={{ padding: "0 16px 12px", background: "rgba(13, 17, 23, 0.85)", backdropFilter: "blur(30px)" }}>
           {attachmentError ? (
             <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.red }}>{attachmentError}</div>
           ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.card, padding: "8px 10px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 16, background: "rgba(255,255,255,0.03)", padding: "10px 14px", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.text }}>{attachmentLabel}</div>
                 <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, wordBreak: "break-word" }}>{pendingAttachment.name} • {formatFileSize(pendingAttachment.size)}</div>
@@ -366,14 +381,15 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
                 type="button"
                 onClick={() => setPendingAttachment(null)}
                 style={{
-                  border: `1px solid ${COLORS.border}`,
+                  border: "none",
                   borderRadius: 999,
-                  background: COLORS.surface,
+                  background: "rgba(255, 255, 255, 0.05)",
                   color: COLORS.textMuted,
                   fontFamily: FONT,
                   fontSize: 10,
-                  padding: "5px 8px",
+                  padding: "6px 12px",
                   cursor: "pointer",
+                  outline: "none",
                 }}
               >
                 REMOVE

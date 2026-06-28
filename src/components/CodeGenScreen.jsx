@@ -75,13 +75,13 @@ export function CodeGenScreen({ onGenerateRoom }) {
       <div
         style={{
           marginTop: 14,
-          background: `linear-gradient(135deg, ${COLORS.card}, #0A1428)`,
+          background: `linear-gradient(135deg, rgba(255, 255, 255, 0.02), rgba(10, 20, 40, 0.2))`,
           borderRadius: 20,
-          padding: "24px 20px",
-          border: `1px solid ${addAlpha(COLORS.accent, "30")}`,
+          padding: "28px 24px",
           textAlign: "center",
           position: "relative",
           overflow: "hidden",
+          boxShadow: "0 10px 40px rgba(0, 0, 0, 0.4)",
         }}
       >
         <div
@@ -104,7 +104,7 @@ export function CodeGenScreen({ onGenerateRoom }) {
 
         {code && !generating && (
           <>
-            <div style={{ fontFamily: FONT, fontSize: 32, fontWeight: 700, color: COLORS.accent, letterSpacing: 6, textShadow: `0 0 20px ${addAlpha(COLORS.accent, "60")}` }}>{code}</div>
+            <div style={{ fontFamily: FONT, fontSize: 32, fontWeight: 700, color: COLORS.accent, letterSpacing: 6, textShadow: `0 0 25px ${addAlpha(COLORS.accent, "40")}` }}>{code}</div>
             <div style={{ marginTop: 8, fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Expires in {expiry} minutes or after single use</div>
           </>
         )}
@@ -116,8 +116,8 @@ export function CodeGenScreen({ onGenerateRoom }) {
 
       {error && <div style={{ marginTop: 12, fontFamily: FONT, fontSize: 11, color: COLORS.red }}>{error}</div>}
 
-      <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: "12px 14px" }}>
-        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 8 }}>EXPIRY DURATION</div>
+      <div style={{ marginTop: 12, background: "rgba(255, 255, 255, 0.02)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 30px rgba(0, 0, 0, 0.3)" }}>
+        <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.textMuted, marginBottom: 10 }}>EXPIRY DURATION</div>
         <div style={{ display: "flex", gap: 8 }}>
           {[5, 10, 30, 60].map((min) => {
             const selected = expiry === min;
@@ -129,13 +129,15 @@ export function CodeGenScreen({ onGenerateRoom }) {
                 style={{
                   flex: 1,
                   borderRadius: 10,
-                  border: `1px solid ${selected ? COLORS.accent : COLORS.border}`,
-                  background: selected ? COLORS.accentDim : COLORS.surface,
+                  border: "none",
+                  background: selected ? "rgba(0, 255, 178, 0.12)" : "rgba(255, 255, 255, 0.03)",
                   color: selected ? COLORS.accent : COLORS.textMuted,
                   fontFamily: FONT,
                   fontSize: 11,
-                  padding: "8px 0",
+                  padding: "10px 0",
                   cursor: "pointer",
+                  outline: "none",
+                  transition: "all 0.2s ease",
                 }}
               >
                 {min}m
@@ -160,8 +162,10 @@ export function CodeGenScreen({ onGenerateRoom }) {
           fontSize: 13,
           fontWeight: 700,
           letterSpacing: 1,
-          background: generating ? COLORS.card : `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
+          background: generating ? "rgba(255, 255, 255, 0.02)" : `linear-gradient(135deg, ${COLORS.accent}, #00D4FF)`,
           color: generating ? COLORS.accent : COLORS.bg,
+          outline: "none",
+          boxShadow: generating ? "none" : `0 4px 20px ${COLORS.accent}30`,
         }}
       >
         {generating ? "⟳ GENERATING..." : "⚡ GENERATE NEW CODE"}
@@ -179,17 +183,18 @@ export function CodeGenScreen({ onGenerateRoom }) {
           cursor: code && !generating ? "pointer" : "not-allowed",
           fontFamily: FONT,
           fontSize: 12,
-          border: `1px solid ${copyState === "success" ? COLORS.accent : copyState === "error" ? COLORS.red : COLORS.border}`,
-          background: copyState === "success" ? COLORS.accentDim : COLORS.card,
+          border: "none",
+          background: copyState === "success" ? "rgba(0, 255, 178, 0.12)" : "rgba(255, 255, 255, 0.02)",
           color: copyState === "success" ? COLORS.accent : copyState === "error" ? COLORS.red : COLORS.textMuted,
-          opacity: code ? 1 : 0.65,
+          opacity: code ? 1 : 0.5,
+          outline: "none",
         }}
       >
         {copyState === "success" ? "✓ COPIED!" : copyState === "error" ? "✕ COPY FAILED" : "📋 COPY CODE"}
       </button>
 
-      <div style={{ marginTop: 18, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}`, padding: 12 }}>
-        <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.accent, marginBottom: 8 }}>HOW IT WORKS</div>
+      <div style={{ marginTop: 18, background: "rgba(255, 255, 255, 0.01)", borderRadius: 16, padding: "16px 18px", boxShadow: "0 8px 30px rgba(0, 0, 0, 0.2)" }}>
+        <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.accent, marginBottom: 12, letterSpacing: 0.5 }}>HOW IT WORKS</div>
         {[
           "Generate a unique peer code here",
           "Share it securely with your contact",
@@ -202,7 +207,7 @@ export function CodeGenScreen({ onGenerateRoom }) {
                 width: 20,
                 height: 20,
                 borderRadius: "50%",
-                background: COLORS.accentDim,
+                background: "rgba(0, 255, 178, 0.08)",
                 color: COLORS.accent,
                 display: "inline-flex",
                 alignItems: "center",
@@ -217,6 +222,7 @@ export function CodeGenScreen({ onGenerateRoom }) {
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }
