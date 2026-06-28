@@ -1,22 +1,28 @@
 import React, { useRef, useEffect, useState } from "react";
 import { COLORS, FONT, SANS } from "../utils/constants.js";
+import { MESSAGE_REACTION_OPTIONS } from "../utils/constants.js";
 import { formatFileSize, isImageMimeType, getNowHHMM, addAlpha } from "../utils/helpers.js";
 import { Avatar, LockIcon } from "./UI.jsx";
 
-export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent, onTypingChange, remoteTyping = false }) {
-  const [msg, setMsg] = useState("");
+export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPruneMessages, onMessageSent, onTypingChange, onDraftChange, onReactMessage, remoteTyping = false, draft = "", replyTarget, onReplyTargetChange }) {
+  const [msg, setMsg] = useState(draft || "");
   const [typing, setTyping] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const endRef = useRef(null);
   const fileInputRef = useRef(null);
   useEffect(() => {
-    setMsg("");
+    setMsg(draft || "");
     setTyping(false);
     setPendingAttachment(null);
     setAttachmentError("");
+    onDraftChange?.(chat?.id, draft || "");
     onTypingChange?.(chat?.id, false);
   }, [chat?.id]);
+
+  useEffect(() => {
+    setMsg(draft || "");
+  }, [draft, chat?.id]);
 
   const shreddingEnabled = settings?.messageShredding ?? true;
   const tunnelEnabled = settings?.websocketTunnels ?? true;
@@ -75,10 +81,13 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
       chat?.id,
       text,
       shreddingEnabled ? 45 : 0,
-      pendingAttachment
+      pendingAttachment,
+      replyTarget || null
     );
     if (onMessageSent) onMessageSent();
     setMsg("");
+    onDraftChange?.(chat?.id, "");
+    onReplyTargetChange?.(null);
     setPendingAttachment(null);
     setAttachmentError("");
   };
@@ -126,6 +135,13 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
         {messages.map((m) => (
           <div key={m.id} style={{ display: "flex", justifyContent: m.from === "me" ? "flex-end" : "flex-start", padding: "0 10px" }}>
             <div style={{ maxWidth: "72%", background: "transparent", border: "none", padding: "4px 8px" }}>
+              {m.replyTo ? (
+                <div style={{ marginBottom: 6, borderLeft: `2px solid ${COLORS.accent}`, paddingLeft: 8, color: COLORS.textMuted, fontFamily: SANS, fontSize: 11 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.accent }}>REPLYING TO {m.replyTo.sender || "message"}</div>
+                  <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.replyTo.preview || "Reply"}</div>
+                </div>
+              ) : null}
+
               {m.text ? <div style={{ fontFamily: SANS, fontSize: 13, color: m.from === "me" ? "#39FF14" : "#00BFFF", lineHeight: 1.4 }}>{m.text}</div> : null}
               {m.attachment ? (
                 <div
@@ -160,10 +176,59 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
                   </div>
                 </div>
               ) : null}
-              <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, textAlign: "right", marginTop: 2 }}>
-                {m.time}
-                {m.from === "me" ? ` ${m.read ? "✓✓" : "✓"}` : ""}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, marginTop: 2 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => onReplyTargetChange?.({ msgId: m.serverMsgId || m.id, sender: m.fromUsername || m.sender || m.from, preview: m.text || m.attachment?.name || "Attachment" })}
+                    style={{
+                      border: `1px solid ${COLORS.border}`,
+                      background: COLORS.surface,
+                      color: COLORS.textMuted,
+                      borderRadius: 999,
+                      fontFamily: FONT,
+                      fontSize: 9,
+                      padding: "3px 7px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ↩ Reply
+                  </button>
+                  {MESSAGE_REACTION_OPTIONS.map((emoji) => (
+                    <button
+                      key={`${m.id}-${emoji}`}
+                      type="button"
+                      onClick={() => onReactMessage?.(chat?.id, m.id, emoji)}
+                      style={{
+                        border: `1px solid ${COLORS.border}`,
+                        background: COLORS.surface,
+                        color: COLORS.textMuted,
+                        borderRadius: 999,
+                        fontFamily: FONT,
+                        fontSize: 9,
+                        padding: "3px 6px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, textAlign: "right" }}>
+                  {m.time}
+                  {m.from === "me" ? ` ${m.read ? "✓✓" : "✓"}` : ""}
+                </div>
               </div>
+
+              {m.reactions && Object.keys(m.reactions).length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                  {Object.entries(m.reactions).map(([emoji, count]) => (
+                    <span key={`${m.id}-${emoji}`} style={{ fontFamily: FONT, fontSize: 9, color: COLORS.accent, background: COLORS.accentDim, borderRadius: 999, padding: "2px 6px" }}>
+                      {emoji} {count}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -222,6 +287,7 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           onChange={(e) => {
             const nextValue = e.target.value;
             setMsg(nextValue);
+            onDraftChange?.(chat?.id, nextValue);
             const nextTyping = Boolean(nextValue.trim());
             setTyping(nextTyping);
             onTypingChange?.(chat?.id, nextTyping);
@@ -260,6 +326,32 @@ export function ChatRoom({ chat, onBack, settings, messages, onSendMessage, onPr
           ➤
         </button>
       </div>
+      {replyTarget && (
+        <div style={{ padding: "0 12px 8px", background: COLORS.surface }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.card, padding: "8px 10px" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent }}>Replying to {replyTarget.sender || "message"}</div>
+              <div style={{ fontFamily: SANS, fontSize: 12, color: COLORS.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{replyTarget.preview || "Reply"}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onReplyTargetChange?.(null)}
+              style={{
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 999,
+                background: COLORS.surface,
+                color: COLORS.textMuted,
+                fontFamily: FONT,
+                fontSize: 10,
+                padding: "5px 8px",
+                cursor: "pointer",
+              }}
+            >
+              CLEAR
+            </button>
+          </div>
+        </div>
+      )}
       {(pendingAttachment || attachmentError) && (
         <div style={{ padding: "0 12px 12px", background: COLORS.surface }}>
           {attachmentError ? (

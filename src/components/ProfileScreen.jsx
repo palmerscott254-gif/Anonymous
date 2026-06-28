@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { COLORS, FONT, SANS, EMOJI_OPTIONS } from "../utils/constants.js";
-import { addAlpha } from "../utils/helpers.js";
+import { addAlpha, fingerprintText } from "../utils/helpers.js";
 
-export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSave, stats }) {
+export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSave, stats, sessionInfo, ownKeyMaterial, sessionId, peerId }) {
   const [editing, setEditing] = useState(false);
   const [tempName, setTempName] = useState("");
   const [selectedEmoji, setSelectedEmoji] = useState(profile?.emoji || "🦅");
+  const [encryptionFingerprint, setEncryptionFingerprint] = useState("");
+  const [signingFingerprint, setSigningFingerprint] = useState("");
   const peerCode = profile?.peerCode || profile?.roomCode || "--";
 
   const save = () => {
@@ -22,6 +24,31 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
       setTempName(profile?.username || "Ghost");
     }
   }, [editing, profile?.emoji, profile?.username]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!ownKeyMaterial?.encryptionPublicKey || !ownKeyMaterial?.signingPublicKey) {
+        setEncryptionFingerprint("");
+        setSigningFingerprint("");
+        return;
+      }
+
+      const [nextEncryption, nextSigning] = await Promise.all([
+        fingerprintText(ownKeyMaterial.encryptionPublicKey),
+        fingerprintText(ownKeyMaterial.signingPublicKey),
+      ]);
+
+      if (!cancelled) {
+        setEncryptionFingerprint(nextEncryption);
+        setSigningFingerprint(nextSigning);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ownKeyMaterial?.encryptionPublicKey, ownKeyMaterial?.signingPublicKey]);
 
   const displayName = `${profile?.emoji || "🦅"} ${profile?.username || "Ghost"}`;
 
@@ -229,6 +256,29 @@ export function ProfileScreen({ settings, onUpdateSettings, profile, onProfileSa
               borderBottom: i === arr.length - 1 ? "none" : `1px solid ${COLORS.border}`,
             }}
           >
+
+          <div style={{ marginTop: 12, background: COLORS.card, borderRadius: 16, border: `1px solid ${addAlpha(COLORS.accent, "26")}`, padding: 14 }}>
+            <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.accent, letterSpacing: 1, marginBottom: 6 }}>SESSION & KEYS</div>
+            <div style={{ display: "grid", gap: 10 }}>
+              <div>
+                <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Session</div>
+                <div style={{ fontFamily: FONT, fontSize: 11, color: COLORS.text, wordBreak: "break-word" }}>{sessionInfo?.user?.username || profile?.username || "Ghost"}</div>
+                <div style={{ fontFamily: FONT, fontSize: 9, color: COLORS.textMuted, wordBreak: "break-word" }}>session {sessionInfo?.claims?.sub || sessionId || "pending"} • peer {peerId || "pending"}</div>
+              </div>
+
+              <div>
+                <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>Key fingerprint</div>
+                <div style={{ display: "grid", gap: 4, marginTop: 4 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text }}>Encrypt: <span style={{ color: COLORS.accent }}>{encryptionFingerprint || "generating..."}</span></div>
+                  <div style={{ fontFamily: FONT, fontSize: 10, color: COLORS.text }}>Sign: <span style={{ color: COLORS.accent }}>{signingFingerprint || "generating..."}</span></div>
+                </div>
+              </div>
+
+              <div style={{ fontFamily: SANS, fontSize: 11, color: COLORS.textMuted }}>
+                Use the fingerprints above to confirm the active device matches the one you expect before sharing a peer code.
+              </div>
+            </div>
+          </div>
             <span style={{ fontSize: 18 }}>{icon}</span>
             <span style={{ fontFamily: SANS, fontSize: 13, color: COLORS.text, flex: 1 }}>{label}</span>
             <button

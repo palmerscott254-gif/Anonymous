@@ -81,6 +81,19 @@ export function readFileAsDataUrl(file) {
   });
 }
 
+export async function fingerprintText(value = "") {
+  if (!value) return "";
+
+  try {
+    const encoder = new TextEncoder();
+    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(String(value)));
+    const bytes = Array.from(new Uint8Array(digest)).slice(0, 8);
+    return bytes.map((byte, index) => `${byte.toString(16).padStart(2, "0")}${index === 3 ? "-" : ""}`).join("");
+  } catch {
+    return String(value).slice(0, 12);
+  }
+}
+
 export async function copyTextToClipboard(text) {
   if (!text) return false;
   try {

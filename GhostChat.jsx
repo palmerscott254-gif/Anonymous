@@ -11,6 +11,7 @@ import { listRooms as fetchRooms, createRoom as createRoomApi } from "./src/serv
 import { fetchMessagesForRoom } from "./src/services/messages.js";
 import { sendEncryptedMessage } from "./src/services/messages.js";
 import { getAccessToken } from "./src/services/auth.js";
+import { fetchCurrentSession } from "./src/services/session.js";
 import { fetchHealth } from "./src/services/health.js";
 import { generatePeerCode as generatePeerCodeRequest } from "./src/services/keys.js";
 import {
@@ -46,6 +47,16 @@ const FONT = "'Space Mono', monospace";
 const SANS = "'DM Sans', sans-serif";
 const TAB_ORDER = ["chats", "search", "codegen", "groups", "profile"];
 const SWIPE_THRESHOLD = 48;
+
+function readStoredJson(key, fallback) {
+  try {
+    const stored = window.localStorage.getItem(key);
+    if (!stored) return fallback;
+    return JSON.parse(stored);
+  } catch {
+    return fallback;
+  }
+}
 
 function isInteractiveSwipeTarget(target) {
   if (!target || typeof target.closest !== "function") return false;
@@ -444,6 +455,10 @@ export default function GhostChat() {
       return {};
     }
   });
+  const [draftsByRoom, setDraftsByRoom] = useState(() => readStoredJson(STORAGE_KEYS.drafts, {}));
+  const [queuedMessages, setQueuedMessages] = useState(() => readStoredJson(STORAGE_KEYS.pendingMessages, []));
+  const [sessionInfo, setSessionInfo] = useState(null);
+  const [replyTarget, setReplyTarget] = useState(null);
   const [typingByRoom, setTypingByRoom] = useState({});
   const touchStartRef = useRef(null);
 
@@ -639,14 +654,14 @@ export default function GhostChat() {
     [connected, ensureOwnKeyMaterial, profile.emoji, profile.username, sessionId, socketEmit, waitForSocketEvent]
   );
 
-  const getRoomByCodeValue = (roomCode) => {
+  const getRoomByCodeValue = useCallback((roomCode) => {
     const key = normalizePeerCode(roomCode);
     if (!key) return null;
     if (roomDirectory[key]) return roomDirectory[key];
     const fromChats = chats.find((item) => normalizePeerCode(item.code) === key);
     if (fromChats) return fromChats;
     return groups.find((item) => normalizePeerCode(item.code) === key) || null;
-  };
+  }, [roomDirectory, chats, groups]);
 
   const upsertEncryptedMessage = async (payload, roomCodeOverride = null, roomIdOverride = null) => {
     const roomCode = payload?.roomCode || roomCodeOverride || "";
@@ -658,6 +673,7 @@ export default function GhostChat() {
     const autoShredAt = payload?.autoShredAt || null;
     let text = payload?.bodyCiphertext || "";
     let resolvedAttachment = payload?.attachment || null;
+    let replyTo = payload?.replyTo || null;
 
     if (payload?.bodyFormat === "E2EE_V1") {
       try {
@@ -695,6 +711,7 @@ export default function GhostChat() {
 
         text = typeof envelope?.text === "string" ? envelope.text : "";
         resolvedAttachment = envelope?.attachment || null;
+        replyTo = envelope?.replyTo || replyTo;
       } catch (error) {
         console.error("[E2EE] Failed to decrypt incoming message", error);
         text = "[Unable to decrypt message]";
@@ -708,8 +725,11 @@ export default function GhostChat() {
       text,
       time: new Date(sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       read: payload?.fromPeerId === peerId,
+      serverMsgId: payload?.msgId || null,
       expiresAt: autoShredAt,
       attachment: resolvedAttachment,
+      replyTo,
+      reactions: payload?.reactions || {},
     };
 
     setMessagesByRoom((prev) => {
@@ -736,6 +756,79 @@ export default function GhostChat() {
       console.warn("[ROOM] Failed to load room history", error);
     }
   };
+
+  const updateRoomMessages = useCallback((roomId, updater) => {
+    if (!roomId || typeof updater !== "function") return;
+    setMessagesByRoom((prev) => {
+      const current = prev[roomId] || [];
+      const next = updater(current);
+      if (next === current) return prev;
+      return { ...prev, [roomId]: next };
+    });
+  }, []);
+
+  const updateMessageById = useCallback((roomId, match, updates) => {
+    updateRoomMessages(roomId, (current) => current.map((item) => {
+      if (typeof match === "function" ? !match(item) : item.id !== match) return item;
+      return { ...item, ...(typeof updates === "function" ? updates(item) : updates) };
+    }));
+  }, [updateRoomMessages]);
+
+  const updateMessageReaction = useCallback((roomId, messageId, emoji) => {
+    updateMessageById(roomId, messageId, (item) => {
+      const currentReactions = item.reactions || {};
+      const nextCount = Number(currentReactions[emoji] || 0) + 1;
+      return {
+        reactions: {
+          ...currentReactions,
+          [emoji]: nextCount,
+        },
+      };
+    });
+  }, [updateMessageById]);
+
+  const markMessageRead = useCallback((roomId, serverMsgId, readAt = Date.now()) => {
+    if (!roomId || !serverMsgId) return;
+    updateRoomMessages(roomId, (current) => current.map((item) => {
+      if (item.serverMsgId !== serverMsgId && item.id !== serverMsgId) return item;
+      return { ...item, read: true, readAt };
+    }));
+  }, [updateRoomMessages]);
+
+  const emitWithAck = useCallback((eventName, payload, timeoutMs = 6000) => {
+    if (!connected) {
+      return Promise.reject(new Error(`Socket not connected for ${eventName}`));
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error(`Timed out waiting for ${eventName}`));
+      }, timeoutMs);
+
+      socketEmit(eventName, payload, (response) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeoutId);
+        resolve(response);
+      });
+    });
+  }, [connected, socketEmit]);
+
+  const deliverMessagePayload = useCallback(async ({ activeRoom, payload, clientMsgId }) => {
+    if (!activeRoom?.code) {
+      throw new Error("Missing room context");
+    }
+
+    if (connected) {
+      const ack = await emitWithAck("msg.send", payload);
+      return ack || { ok: true };
+    }
+
+    return sendEncryptedMessage(activeRoom.code, payload, getAccessToken());
+  }, [connected, emitWithAck]);
 
   useEffect(() => {
     ensureOwnKeyMaterial().catch((error) => {
@@ -805,6 +898,62 @@ export default function GhostChat() {
   }, [activeChat?.code, activeChat?.id]);
 
   useEffect(() => {
+    setReplyTarget(null);
+  }, [activeChat?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCurrentSession()
+      .then((payload) => {
+        if (!cancelled) setSessionInfo(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setSessionInfo(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.drafts, JSON.stringify(draftsByRoom));
+  }, [draftsByRoom]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.pendingMessages, JSON.stringify(queuedMessages));
+  }, [queuedMessages]);
+
+  useEffect(() => {
+    if (!connected || queuedMessages.length === 0) return undefined;
+    let cancelled = false;
+
+    (async () => {
+      for (const queued of [...queuedMessages]) {
+        if (cancelled) return;
+        try {
+          const room = getRoomByCodeValue(queued?.roomCode) || { id: queued?.roomId, code: queued?.roomCode };
+          const response = await deliverMessagePayload({ activeRoom: room, payload: queued.payload, clientMsgId: queued.clientMsgId });
+          const deliveredMessageId = response?.messageId || response?.message?.msgId || response?.msgId || null;
+          if (deliveredMessageId) {
+            updateMessageById(room?.id || queued.roomId, queued.clientMsgId, {
+              serverMsgId: deliveredMessageId,
+            });
+          }
+          setQueuedMessages((prev) => prev.filter((item) => item.clientMsgId !== queued.clientMsgId));
+        } catch (error) {
+          console.warn("[QUEUE] Failed to flush queued message", error);
+          return;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, queuedMessages, deliverMessagePayload, getRoomByCodeValue, updateMessageById]);
+
+  useEffect(() => {
     if (!document.getElementById("gc-fonts")) {
       const link = document.createElement("link");
       link.id = "gc-fonts";
@@ -849,13 +998,32 @@ export default function GhostChat() {
         socketOn('msg.new', async (payload) => {
           console.log('[SOCKET.RECEIVED] msg.new', payload);
           if (payload?.fromPeerId === peerId) return;
-          upsertEncryptedMessage(payload, payload?.roomCode, payload?.roomId);
+          const inserted = await upsertEncryptedMessage(payload, payload?.roomCode, payload?.roomId);
+          if (inserted && activeChat?.id && payload?.roomId === activeChat.id) {
+            socketEmit('msg.read', {
+              roomId: payload?.roomId,
+              roomCode: payload?.roomCode,
+              msgId: payload?.msgId || inserted.serverMsgId || inserted.id,
+              readAt: Date.now(),
+            });
+          }
         })
       );
 
       unsubscribers.push(
         socketOn('msg.ack', (payload) => {
           console.log('[SOCKET.RECEIVED] msg.ack', payload);
+          if (!payload?.clientMsgId) return;
+          updateMessageById(payload?.roomId || activeChat?.id, payload.clientMsgId, {
+            serverMsgId: payload?.msgId || payload?.messageId || null,
+          });
+        })
+      );
+
+      unsubscribers.push(
+        socketOn('msg.read', (payload) => {
+          console.log('[SOCKET.RECEIVED] msg.read', payload);
+          markMessageRead(payload?.roomId || activeChat?.id, payload?.msgId, payload?.readAt || Date.now());
         })
       );
 
@@ -960,7 +1128,7 @@ export default function GhostChat() {
     return () => {
       unsubscribers.forEach(unsub => unsub?.());
     };
-  }, [connected, socketOn, peerId, activeChat?.id, activeChat?.code, chats, groups, roomDirectory]);
+  }, [connected, socketOn, peerId, activeChat?.id, activeChat?.code, chats, groups, roomDirectory, updateMessageById, markMessageRead, socketEmit]);
 
   useEffect(() => {
     window.localStorage.setItem("gc.settings", JSON.stringify(settings));
@@ -1068,13 +1236,8 @@ export default function GhostChat() {
     }
   };
 
-  const sendMessage = async (roomId, text, autoShredSeconds = 0, attachment = null) => {
+  const sendMessage = async (roomId, text, autoShredSeconds = 0, attachment = null, replyTarget = null) => {
     if (!roomId || (!text?.trim() && !attachment)) return;
-    if (!connected) {
-      console.warn('[MSG] Cannot send: socket not connected');
-      return;
-    }
-
     const clientMsgId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const summaryText = text?.trim() || (attachment ? (isImageMimeType(attachment.mimeType) ? attachment.name || "Image" : attachment.name || "File") : "");
     const activeRoom = activeChat;
@@ -1096,6 +1259,13 @@ export default function GhostChat() {
     const envelope = {
       text: text?.trim() || "",
       attachment,
+      replyTo: replyTarget
+        ? {
+            msgId: replyTarget.msgId || null,
+            sender: replyTarget.sender || null,
+            preview: replyTarget.preview || null,
+          }
+        : null,
       version: 1,
     };
 
@@ -1122,8 +1292,11 @@ export default function GhostChat() {
       text: text?.trim() || "",
       time: getNowHHMM(),
       read: false,
+      serverMsgId: null,
       expiresAt: autoShredSeconds > 0 ? Date.now() + autoShredSeconds * 1000 : undefined,
       attachment,
+      replyTo: envelope.replyTo,
+      reactions: {},
     };
 
     // Add to local state immediately for UI responsiveness
@@ -1154,33 +1327,31 @@ export default function GhostChat() {
       signingPublicKey: keyMaterial.signingPublicKey,
     };
 
-    if (connected) {
-      try {
-        console.log('[SOCKET.OUTBOUND] msg.send', {
-          roomCode: activeRoom.code,
-          roomId: activeRoom.id,
-          clientMsgId,
-        });
-        const messageAckPromise = waitForSocketEvent(
-          'msg.ack',
-          (response) => response?.clientMsgId === clientMsgId,
-          6000
-        );
-
-        socketEmit('msg.send', payload);
-
-        await messageAckPromise;
-
-        return;
-      } catch (error) {
-        console.warn('[MSG] Socket send did not confirm; falling back to HTTP', error);
-      }
-    }
-
     try {
-      await sendEncryptedMessage(activeRoom.code, payload, getAccessToken());
+      const response = await deliverMessagePayload({ activeRoom, payload, clientMsgId });
+      const deliveredMessageId = response?.messageId || response?.message?.msgId || response?.msgId || null;
+
+      if (deliveredMessageId) {
+        updateMessageById(roomId, clientMsgId, {
+          serverMsgId: deliveredMessageId,
+        });
+      }
+
+      return response;
     } catch (error) {
-      console.error('[MSG] REST fallback failed', error);
+      console.warn('[MSG] Delivery failed, queueing for retry', error);
+      setQueuedMessages((prev) => {
+        if (prev.some((item) => item.clientMsgId === clientMsgId)) return prev;
+        return [
+          ...prev,
+          {
+            roomId,
+            roomCode: activeRoom.code,
+            clientMsgId,
+            payload,
+          },
+        ];
+      });
     }
   };
 
@@ -1295,6 +1466,20 @@ export default function GhostChat() {
         onSendMessage={sendMessage}
         onPruneMessages={pruneRoomMessages}
         onMessageSent={() => setActivity((prev) => ({ ...prev, messages: prev.messages + 1 }))}
+        draft={draftsByRoom[activeChat.id] || ""}
+        onDraftChange={(roomId, nextDraft) => {
+          if (!roomId) return;
+          setDraftsByRoom((prev) => {
+            if (!nextDraft) {
+              const { [roomId]: _removed, ...rest } = prev;
+              return rest;
+            }
+            return { ...prev, [roomId]: nextDraft };
+          });
+        }}
+        onReactMessage={updateMessageReaction}
+        replyTarget={replyTarget}
+        onReplyTargetChange={setReplyTarget}
         remoteTyping={Boolean(typingByRoom[activeChat.id])}
         onTypingChange={(roomId, isTyping) => {
           if (!connected || !activeChat?.code) return;
@@ -1348,6 +1533,10 @@ export default function GhostChat() {
         profile={profile}
         onProfileSave={(partial) => setProfile((prev) => ({ ...prev, ...partial }))}
         stats={stats}
+        sessionInfo={sessionInfo}
+        ownKeyMaterial={ownKeyMaterialRef.current}
+        sessionId={sessionId}
+        peerId={peerId}
       />;
   }
 

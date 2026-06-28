@@ -46,10 +46,14 @@ export const STORAGE_KEYS = {
   groups: "gc.groups",
   rooms: "gc.rooms",
   messages: "gc.messages",
+  drafts: "gc.drafts",
+  pendingMessages: "gc.pendingMessages",
   settings: "gc.settings",
   profile: "gc.profile",
   activity: "gc.activity",
 };
+
+export const MESSAGE_REACTION_OPTIONS = ["👍", "❤️", "🔥", "👀"];
 
 export const EMOJI_OPTIONS = {
   profile: ["🦅", "🦊", "🐺", "🌙", "🔥", "⚡", "🎭", "🐉", "🦋", "🛸", "💀", "🌊"],
