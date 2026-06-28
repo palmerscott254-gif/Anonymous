@@ -940,7 +940,7 @@ export default function GhostChat() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [peerId, sessionId]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.drafts, JSON.stringify(draftsByRoom));
@@ -1535,7 +1535,10 @@ export default function GhostChat() {
     content =
       <CodeGenScreen
         onGenerateRoom={async (expiry) => {
-          const response = await generatePeerCodeRequest(expiry);
+          const response = await generatePeerCodeRequest(expiry, profile);
+          fetchCurrentSession()
+            .then((payload) => setSessionInfo(payload))
+            .catch(() => setSessionInfo(null));
           setProfile((prev) => ({
             ...prev,
             peerCode: displayPeerCode(response.code || prev?.peerCode || ""),
