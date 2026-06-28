@@ -79,6 +79,21 @@ const TypingSchema = z.object({
   isTyping: z.boolean(),
 });
 
+const MessageReadSchema = z.object({
+  roomCode: z.string().optional(),
+  roomId: z.string().optional(),
+  msgId: z.string().min(1).max(120),
+  readAt: z.number().int().positive().optional(),
+});
+
+const MessageReactionSchema = z.object({
+  roomCode: z.string().optional(),
+  roomId: z.string().optional(),
+  msgId: z.string().min(1).max(120),
+  emoji: z.string().min(1).max(16),
+  reactedAt: z.number().int().positive().optional(),
+});
+
 function socketMeta(socket) {
   return {
     ip: socket.handshake.address || socket.request?.socket?.remoteAddress || 'unknown-ip',
@@ -149,7 +164,7 @@ export function setupSocketHandlers(io, deps) {
     const meta = socketMeta(socket);
 
     socket.onAny((eventName, payload) => {
-      if (['session.hello', 'room.generate_code', 'room:generate', 'room.join', 'room:join', 'msg.send', 'msg:send', 'typing.set', 'typing:set', 'msg.read', 'msg:read', 'room.leave', 'room:leave'].includes(eventName)) {
+      if (['session.hello', 'room.generate_code', 'room:generate', 'room.join', 'room:join', 'msg.send', 'msg:send', 'typing.set', 'typing:set', 'msg.read', 'msg:read', 'msg.react', 'msg:react', 'room.leave', 'room:leave'].includes(eventName)) {
         console.log(`[SOCKET.INBOUND] ${sessionId} ${eventName}`, payload);
       }
     });
@@ -505,6 +520,89 @@ export function setupSocketHandlers(io, deps) {
           isTyping: Boolean(parsed.isTyping),
           ts: Date.now(),
         });
+      })
+    );
+
+    registerAliases(
+      socket,
+      ['msg.read', 'msg:read'],
+      withError(socket, 'msg.read', null, async (payload, ack) => {
+        const session = getUserSession(sessionId);
+        if (!session || !session.roomCode) {
+          emitAck(ack, { ok: false });
+          return;
+        }
+
+        const allowed = enforceSocketRateLimit({
+          socketId: sessionId,
+          eventName: 'msg.read',
+          limitPerMinute: env.NODE_ENV === 'production' ? 180 : 800,
+          ip: session.ip,
+          userId: session.userId || 'guest',
+        });
+        if (!allowed) return;
+
+        const parsed = MessageReadSchema.parse(payload || {});
+        const room = getRoomByCode(parsed.roomCode || session.roomCode);
+        if (!room || !room.members.has(session.peerId)) return;
+
+        const readPayload = {
+          roomCode: room.code,
+          roomId: room.id,
+          peerId: session.peerId,
+          username: session.username,
+          msgId: parsed.msgId,
+          readAt: parsed.readAt || Date.now(),
+        };
+
+        io.to(`room:${room.code}`).emit('msg.read', readPayload);
+        io.to(room.code).emit('msg:read', readPayload);
+        emitAck(ack, { ok: true, ...readPayload });
+      })
+    );
+
+    registerAliases(
+      socket,
+      ['msg.react', 'msg:react'],
+      withError(socket, 'msg.react', null, async (payload, ack) => {
+        const session = getUserSession(sessionId);
+        if (!session || !session.roomCode) {
+          emitAck(ack, { ok: false });
+          return;
+        }
+
+        const allowed = enforceSocketRateLimit({
+          socketId: sessionId,
+          eventName: 'msg.react',
+          limitPerMinute: env.NODE_ENV === 'production' ? 120 : 600,
+          ip: session.ip,
+          userId: session.userId || 'guest',
+        });
+        if (!allowed) return;
+
+        const parsed = MessageReactionSchema.parse(payload || {});
+        const room = getRoomByCode(parsed.roomCode || session.roomCode);
+        if (!room || !room.members.has(session.peerId)) return;
+
+        const target = room.messages.find((message) => message.msgId === parsed.msgId || message.clientMsgId === parsed.msgId);
+        if (target) {
+          target.reactions = target.reactions || {};
+          target.reactions[parsed.emoji] = Number(target.reactions[parsed.emoji] || 0) + 1;
+        }
+
+        const reactionPayload = {
+          roomCode: room.code,
+          roomId: room.id,
+          peerId: session.peerId,
+          username: session.username,
+          msgId: parsed.msgId,
+          emoji: parsed.emoji,
+          reactedAt: parsed.reactedAt || Date.now(),
+        };
+
+        io.to(`room:${room.code}`).emit('msg.reaction', reactionPayload);
+        io.to(room.code).emit('msg:reaction', reactionPayload);
+        emitAck(ack, { ok: true, ...reactionPayload });
       })
     );
 

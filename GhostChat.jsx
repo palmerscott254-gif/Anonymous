@@ -491,6 +491,7 @@ export default function GhostChat() {
   const { connected, peerId, sessionId, emit: socketEmit, on: socketOn } = useSocket(profile);
   const ownKeyMaterialRef = useRef(null);
   const ownKeyMaterialPromiseRef = useRef(null);
+  const [ownKeyMaterialSnapshot, setOwnKeyMaterialSnapshot] = useState(null);
   const roomMemberKeysRef = useRef({});
   const joinedRoomSignatureRef = useRef(null);
   const roomJoinInFlightRef = useRef(null);
@@ -504,6 +505,7 @@ export default function GhostChat() {
       ownKeyMaterialPromiseRef.current = generateKeyMaterial()
         .then((material) => {
           ownKeyMaterialRef.current = material;
+          setOwnKeyMaterialSnapshot(material);
           return material;
         })
         .catch((error) => {
@@ -533,7 +535,14 @@ export default function GhostChat() {
     });
 
     roomMemberKeysRef.current[normalizedCode] = next;
+  };
 
+  const upsertRoomMember = (roomCode, member) => {
+    const normalizedCode = normalizePeerCode(roomCode);
+    if (!normalizedCode || !member?.peerId) return;
+    const encryptionPublicKey = member?.e2ee?.encryptionPublicKey;
+    const signingPublicKey = member?.e2ee?.signingPublicKey;
+    if (!encryptionPublicKey || !signingPublicKey) return;
 
     const roomMembers = roomMemberKeysRef.current[normalizedCode] || {};
     roomMemberKeysRef.current[normalizedCode] = {
@@ -775,7 +784,7 @@ export default function GhostChat() {
   }, [updateRoomMessages]);
 
   const updateMessageReaction = useCallback((roomId, messageId, emoji) => {
-    updateMessageById(roomId, messageId, (item) => {
+    updateMessageById(roomId, (item) => item.id === messageId || item.serverMsgId === messageId, (item) => {
       const currentReactions = item.reactions || {};
       const nextCount = Number(currentReactions[emoji] || 0) + 1;
       return {
@@ -786,6 +795,23 @@ export default function GhostChat() {
       };
     });
   }, [updateMessageById]);
+
+  const reactToMessage = useCallback((roomId, messageId, emoji) => {
+    const roomMessages = messagesByRoom[roomId] || [];
+    const message = roomMessages.find((item) => item.id === messageId || item.serverMsgId === messageId);
+    const outboundMsgId = message?.serverMsgId || message?.id || messageId;
+
+    updateMessageReaction(roomId, messageId, emoji);
+
+    if (!connected || !activeChat?.code || !outboundMsgId) return;
+    socketEmit('msg.react', {
+      roomId,
+      roomCode: activeChat.code,
+      msgId: outboundMsgId,
+      emoji,
+      reactedAt: Date.now(),
+    });
+  }, [activeChat?.code, connected, messagesByRoom, socketEmit, updateMessageReaction]);
 
   const markMessageRead = useCallback((roomId, serverMsgId, readAt = Date.now()) => {
     if (!roomId || !serverMsgId) return;
@@ -1028,6 +1054,16 @@ export default function GhostChat() {
       );
 
       unsubscribers.push(
+        socketOn('msg.reaction', (payload) => {
+          console.log('[SOCKET.RECEIVED] msg.reaction', payload);
+          if (payload?.peerId === peerId) return;
+          const roomId = payload?.roomId || activeChat?.id;
+          if (!roomId || !payload?.msgId || !payload?.emoji) return;
+          updateMessageReaction(roomId, payload.msgId, payload.emoji);
+        })
+      );
+
+      unsubscribers.push(
         socketOn('error', (payload) => {
           console.error('[SOCKET.RECEIVED] error', payload);
         })
@@ -1128,7 +1164,7 @@ export default function GhostChat() {
     return () => {
       unsubscribers.forEach(unsub => unsub?.());
     };
-  }, [connected, socketOn, peerId, activeChat?.id, activeChat?.code, chats, groups, roomDirectory, updateMessageById, markMessageRead, socketEmit]);
+  }, [connected, socketOn, peerId, activeChat?.id, activeChat?.code, chats, groups, roomDirectory, updateMessageById, updateMessageReaction, markMessageRead, socketEmit]);
 
   useEffect(() => {
     window.localStorage.setItem("gc.settings", JSON.stringify(settings));
@@ -1477,7 +1513,7 @@ export default function GhostChat() {
             return { ...prev, [roomId]: nextDraft };
           });
         }}
-        onReactMessage={updateMessageReaction}
+        onReactMessage={reactToMessage}
         replyTarget={replyTarget}
         onReplyTargetChange={setReplyTarget}
         remoteTyping={Boolean(typingByRoom[activeChat.id])}
@@ -1534,7 +1570,7 @@ export default function GhostChat() {
         onProfileSave={(partial) => setProfile((prev) => ({ ...prev, ...partial }))}
         stats={stats}
         sessionInfo={sessionInfo}
-        ownKeyMaterial={ownKeyMaterialRef.current}
+        ownKeyMaterial={ownKeyMaterialSnapshot}
         sessionId={sessionId}
         peerId={peerId}
       />;
