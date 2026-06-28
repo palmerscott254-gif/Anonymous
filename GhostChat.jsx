@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSocket } from "./src/hooks/useSocket";
 import { Avatar, NavBar, LockIcon, ShieldIcon } from "./src/components/UI.jsx";
 import { ChatsScreen } from "./src/components/ChatsScreen.jsx";
@@ -487,11 +487,22 @@ export default function GhostChat() {
     };
   }, []);
 
-  // Socket.IO integration
-  const { connected, peerId, sessionId, emit: socketEmit, on: socketOn } = useSocket(profile);
   const ownKeyMaterialRef = useRef(null);
   const ownKeyMaterialPromiseRef = useRef(null);
   const [ownKeyMaterialSnapshot, setOwnKeyMaterialSnapshot] = useState(null);
+  const socketIdentity = useMemo(() => ({
+    username: profile.username,
+    emoji: profile.emoji,
+    keys: ownKeyMaterialSnapshot
+      ? {
+          encryptionPublicKey: ownKeyMaterialSnapshot.encryptionPublicKey,
+          signingPublicKey: ownKeyMaterialSnapshot.signingPublicKey,
+        }
+      : undefined,
+  }), [ownKeyMaterialSnapshot, profile.emoji, profile.username]);
+
+  // Socket.IO integration
+  const { connected, peerId, sessionId, emit: socketEmit, on: socketOn } = useSocket(socketIdentity);
   const roomMemberKeysRef = useRef({});
   const joinedRoomSignatureRef = useRef(null);
   const roomJoinInFlightRef = useRef(null);
@@ -1535,7 +1546,15 @@ export default function GhostChat() {
     content =
       <CodeGenScreen
         onGenerateRoom={async (expiry) => {
-          const response = await generatePeerCodeRequest(expiry, profile);
+          const keyMaterial = await ensureOwnKeyMaterial();
+          const response = await generatePeerCodeRequest(expiry, {
+            username: profile.username,
+            emoji: profile.emoji,
+            keys: {
+              encryptionPublicKey: keyMaterial.encryptionPublicKey,
+              signingPublicKey: keyMaterial.signingPublicKey,
+            },
+          });
           fetchCurrentSession()
             .then((payload) => setSessionInfo(payload))
             .catch(() => setSessionInfo(null));
